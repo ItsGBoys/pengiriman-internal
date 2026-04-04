@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import dynamic from "next/dynamic"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -32,6 +33,11 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 
+const BarcodeScanner = dynamic(
+  () => import("@/components/input/BarcodeScanner"),
+  { ssr: false }
+)
+
 const TIPE_MESIN = [
   { kode: "NA-F10JSZ1", kategori: "front-load" as const },
   { kode: "NA-F70JSZ1", kategori: "front-load" as const },
@@ -59,6 +65,10 @@ const TIPE_MESIN_FRONT_LOAD = TIPE_MESIN.filter((t) =>
 const TIPE_MESIN_TOP_LOAD = TIPE_MESIN.filter((t) =>
   t.kode.startsWith("NA-W")
 )
+
+const getKategori = (kodeTipe: string): "front-load" | "top-load" => {
+  return kodeTipe.startsWith("NA-F") ? "front-load" : "top-load"
+}
 
 type BarisTipe = {
   id: string
@@ -101,6 +111,20 @@ export default function InputPengirimanPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [scannerState, setScannerState] = useState<{
+    open: boolean
+    lineId: string
+    kategori: "front-load" | "top-load"
+  } | null>(null)
+
+  const barisRef = useRef(baris)
+  const scannerStateRef = useRef(scannerState)
+  useEffect(() => {
+    barisRef.current = baris
+  }, [baris])
+  useEffect(() => {
+    scannerStateRef.current = scannerState
+  }, [scannerState])
 
   const totalSerial = useMemo(
     () => baris.reduce((acc, b) => acc + b.serials.length, 0),
@@ -239,6 +263,34 @@ export default function InputPengirimanPage() {
           : b
       )
     )
+  }
+
+  function handleBarcodeResult(serialNumber: string) {
+    const st = scannerStateRef.current
+    if (!st?.open) return
+    const lineId = st.lineId
+    const sn = serialNumber.trim()
+    const key = sn.toLowerCase()
+    const prev = barisRef.current
+
+    const seen = new Map<string, string>()
+    for (const b of prev) {
+      for (const raw of b.serials) {
+        seen.set(raw.trim().toLowerCase(), b.tipe)
+      }
+    }
+    if (seen.has(key)) {
+      setFormError(
+        `Nomor seri "${sn}" duplikat (juga muncul pada tipe "${seen.get(key)}"). Satu pengiriman tidak boleh memuat nomor seri yang sama.`
+      )
+      return
+    }
+
+    setFormError(null)
+    const row = prev.find((b) => b.id === lineId)
+    updateBaris(lineId, {
+      serials: [...(row?.serials ?? []), sn],
+    })
   }
 
   return (
@@ -386,7 +438,11 @@ export default function InputPengirimanPage() {
                             variant="secondary"
                             className="h-10 shrink-0 sm:w-auto"
                             onClick={() =>
-                              alert("Fitur scan segera hadir")
+                              setScannerState({
+                                open: true,
+                                lineId: b.id,
+                                kategori: getKategori(b.tipe),
+                              })
                             }
                           >
                             Scan Serial Number
@@ -467,6 +523,13 @@ export default function InputPengirimanPage() {
           </Button>
         </CardFooter>
       </Card>
+
+      <BarcodeScanner
+        isOpen={Boolean(scannerState?.open)}
+        kategori={scannerState?.kategori ?? "front-load"}
+        onClose={() => setScannerState(null)}
+        onResult={handleBarcodeResult}
+      />
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent showClose={!saving}>
