@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -24,19 +24,46 @@ import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { ScannerModal } from "@/components/input/ScannerModal"
 
-const TIPE_OPTIONS = [
-  "Front Load 7kg",
-  "Front Load 9kg",
-  "Top Load 7kg",
-  "Top Load 9kg",
-  "Top Load 12kg",
-] as const
+const TIPE_MESIN = [
+  { kode: "NA-F10JSZ1", kategori: "front-load" as const },
+  { kode: "NA-F70JSZ1", kategori: "front-load" as const },
+  { kode: "NA-F80JSZ1", kategori: "front-load" as const },
+  { kode: "NA-F90JSZ1", kategori: "front-load" as const },
+  { kode: "NA-W110BBZ3A", kategori: "top-load" as const },
+  { kode: "NA-W130FCV3A", kategori: "top-load" as const },
+  { kode: "NA-W150FCV3A", kategori: "top-load" as const },
+  { kode: "NA-W76BBZ2H", kategori: "top-load" as const },
+  { kode: "NA-W76BBZ4H", kategori: "top-load" as const },
+  { kode: "NA-W78BCV1V", kategori: "top-load" as const },
+  { kode: "NA-W80BBZ3A", kategori: "top-load" as const },
+  { kode: "NA-W80BBZ4H", kategori: "top-load" as const },
+  { kode: "NA-W80FCU3A", kategori: "top-load" as const },
+  { kode: "NA-W80FCV3A", kategori: "top-load" as const },
+  { kode: "NA-W90BBZ3A", kategori: "top-load" as const },
+  { kode: "NA-W90FCU3A", kategori: "top-load" as const },
+  { kode: "NA-W90FCV3A", kategori: "top-load" as const },
+  { kode: "NA-W96BBZ2H", kategori: "top-load" as const },
+]
+
+const TIPE_MESIN_FRONT_LOAD = TIPE_MESIN.filter((t) =>
+  t.kode.startsWith("NA-F")
+)
+const TIPE_MESIN_TOP_LOAD = TIPE_MESIN.filter((t) =>
+  t.kode.startsWith("NA-W")
+)
+
+const getKategori = (kodeTipe: string): "front-load" | "top-load" => {
+  return kodeTipe.startsWith("NA-F") ? "front-load" : "top-load"
+}
 
 type BarisTipe = {
   id: string
@@ -79,6 +106,16 @@ export default function InputPengirimanPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [scannerState, setScannerState] = useState<{
+    open: boolean
+    lineId: string
+    kategori: "front-load" | "top-load"
+  } | null>(null)
+
+  const barisRef = useRef(baris)
+  useEffect(() => {
+    barisRef.current = baris
+  }, [baris])
 
   const totalSerial = useMemo(
     () => baris.reduce((acc, b) => acc + b.serials.length, 0),
@@ -219,6 +256,33 @@ export default function InputPengirimanPage() {
     )
   }
 
+  function handleScannerResult(serialNumber: string) {
+    if (!scannerState?.open) return
+    const lineId = scannerState.lineId
+    const sn = serialNumber.trim()
+    const key = sn.toLowerCase()
+    const prev = barisRef.current
+
+    const seen = new Map<string, string>()
+    for (const b of prev) {
+      for (const raw of b.serials) {
+        seen.set(raw.trim().toLowerCase(), b.tipe)
+      }
+    }
+    if (seen.has(key)) {
+      setFormError(
+        `Nomor seri "${sn}" duplikat (juga muncul pada tipe "${seen.get(key)}"). Satu pengiriman tidak boleh memuat nomor seri yang sama.`
+      )
+      return
+    }
+
+    setFormError(null)
+    const row = prev.find((b) => b.id === lineId)
+    updateBaris(lineId, {
+      serials: [...(row?.serials ?? []), sn],
+    })
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4 pb-10 sm:p-6">
       {successMsg ? (
@@ -318,18 +382,29 @@ export default function InputPengirimanPage() {
                           <SelectValue placeholder="Pilih tipe" />
                         </SelectTrigger>
                         <SelectContent>
-                          {TIPE_OPTIONS.map((opt) => (
-                            <SelectItem key={opt} value={opt}>
-                              {opt}
-                            </SelectItem>
-                          ))}
+                          <SelectGroup>
+                            <SelectLabel>Front Load (1 Tabung)</SelectLabel>
+                            {TIPE_MESIN_FRONT_LOAD.map((t) => (
+                              <SelectItem key={t.kode} value={t.kode}>
+                                {t.kode}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                          <SelectGroup>
+                            <SelectLabel>Top Load (2 Tabung)</SelectLabel>
+                            {TIPE_MESIN_TOP_LOAD.map((t) => (
+                              <SelectItem key={t.kode} value={t.kode}>
+                                {t.kode}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
                         </SelectContent>
                       </Select>
                     </div>
 
                     <div className="space-y-2">
                       <Label className="text-xs">Scan nomor seri (manual)</Label>
-                      <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                         <Input
                           value={b.draftSerial}
                           onChange={(e) =>
@@ -344,9 +419,25 @@ export default function InputPengirimanPage() {
                             }
                           }}
                           placeholder="Ketik nomor seri"
-                          className="h-10 flex-1"
+                          className="h-10 min-w-0 flex-1"
                           autoComplete="off"
                         />
+                        {b.tipe.trim() ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="h-10 shrink-0 sm:w-auto"
+                            onClick={() =>
+                              setScannerState({
+                                open: true,
+                                lineId: b.id,
+                                kategori: getKategori(b.tipe),
+                              })
+                            }
+                          >
+                            Scan Serial Number
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           variant="outline"
@@ -422,6 +513,13 @@ export default function InputPengirimanPage() {
           </Button>
         </CardFooter>
       </Card>
+
+      <ScannerModal
+        isOpen={Boolean(scannerState?.open)}
+        kategori={scannerState?.kategori ?? "front-load"}
+        onClose={() => setScannerState(null)}
+        onResult={handleScannerResult}
+      />
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent showClose={!saving}>
