@@ -33,8 +33,8 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 
-const BarcodeScanner = dynamic(
-  () => import("@/components/input/BarcodeScanner"),
+const YoloScanner = dynamic(
+  () => import("@/components/input/YoloScanner"),
   { ssr: false }
 )
 
@@ -555,7 +555,7 @@ export default function InputPengirimanPage() {
         </CardFooter>
       </Card>
 
-      <BarcodeScanner
+      <YoloScanner
         isOpen={Boolean(scannerState?.open)}
         kategori={scannerState?.kategori ?? "front-load"}
         onClose={() => setScannerState(null)}
