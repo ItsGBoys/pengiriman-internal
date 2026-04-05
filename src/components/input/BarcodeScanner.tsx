@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
-const SERIAL_PATTERN = /\b25[0-9A-C]\d{7}\b/
+const SERIAL_PATTERN = /\b\d{2}[0-9OND]\d{7}\b/
 
 export interface BarcodeScannerProps {
   isOpen: boolean
@@ -80,6 +80,7 @@ export default function BarcodeScanner({
             return
           }
           if (!result) return
+          console.log('Raw scan result:', result.getText())
           const upper = result.getText().toUpperCase()
           const match = upper.match(SERIAL_PATTERN)
           if (match) {
