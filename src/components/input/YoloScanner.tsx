@@ -1,9 +1,9 @@
-"use client"
+'use client'
 
 import { useEffect, useId, useRef, useState } from "react"
 import { X } from "lucide-react"
 import type { Html5Qrcode } from "html5-qrcode"
-import type * as OrtNS from "onnxruntime-web"
+import type { InferenceSession } from "onnxruntime-common"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -37,10 +37,10 @@ type Detection = {
   score: number
 }
 
-let yoloSessionPromise: Promise<OrtNS.InferenceSession> | null = null
+let yoloSessionPromise: Promise<InferenceSession> | null = null
 let cachedInputSize: number | null = null
 
-function getSquareInputSize(session: OrtNS.InferenceSession): number {
+function getSquareInputSize(session: InferenceSession): number {
   const name = session.inputNames[0]
   const meta = session.inputMetadata.find((m) => m.name === name)
   if (!meta || !meta.isTensor) return 512
@@ -53,7 +53,7 @@ function getSquareInputSize(session: OrtNS.InferenceSession): number {
   return 512
 }
 
-async function getYoloSession(): Promise<OrtNS.InferenceSession> {
+async function getYoloSession(): Promise<InferenceSession> {
   if (!yoloSessionPromise) {
     yoloSessionPromise = (async () => {
       const ort = await import("onnxruntime-web")
@@ -300,7 +300,7 @@ export default function YoloScanner({
   const preCanvasRef = useRef<HTMLCanvasElement>(null)
   const cropCanvasRef = useRef<HTMLCanvasElement>(null)
 
-  const sessionRef = useRef<OrtNS.InferenceSession | null>(null)
+  const sessionRef = useRef<InferenceSession | null>(null)
   const inputSizeRef = useRef(512)
   const decoderRef = useRef<Html5Qrcode | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
