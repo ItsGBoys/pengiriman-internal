@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import type { Html5Qrcode } from "html5-qrcode"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -11,6 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
+const scannerId = "barcode-scanner-container"
 const SERIAL_PATTERN = /\b\d{2}[0-9OND]\d{7}\b/
 
 export interface BarcodeScannerProps {
@@ -26,11 +28,7 @@ export default function BarcodeScanner({
   onResult,
   kategori,
 }: BarcodeScannerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const readerRef = useRef<{
-    reset: () => void
-  } | null>(null)
-  const isScanningRef = useRef(false)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
   const onResultRef = useRef(onResult)
   const onCloseRef = useRef(onClose)
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -40,120 +38,91 @@ export default function BarcodeScanner({
 
   useEffect(() => {
     if (!isOpen) {
-      isScanningRef.current = false
-      readerRef.current?.reset()
-      readerRef.current = null
+      scannerRef.current?.stop().catch(() => {})
+      scannerRef.current = null
       setCameraError(null)
       return
     }
 
-    if (isScanningRef.current) return
-    isScanningRef.current = true
-
     let cancelled = false
-    let restorePlay: (() => void) | null = null
 
-    const start = async () => {
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      })
-      if (cancelled) return
-
-      const video = videoRef.current
-      if (!video) {
-        isScanningRef.current = false
-        return
-      }
-
+    const run = async () => {
       try {
-        const {
-          BrowserMultiFormatReader,
-          DecodeHintType,
-          NotFoundException,
-        } = await import("@zxing/library")
+        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import(
+          "html5-qrcode"
+        )
 
-        if (cancelled) {
-          isScanningRef.current = false
-          return
-        }
-
-        const origPlay = video.play.bind(video)
-        video.play = () => {
-          return (async () => {
-            try {
-              if (video.paused) await origPlay()
-            } catch (_) {}
-          })()
-        }
-        restorePlay = () => {
-          video.play = origPlay
-          restorePlay = null
-        }
-
-        // Kamera belakang: deviceId null → ZXing memakai facingMode "environment"
-        // (setara prefer kamera depan = false)
-        const hints = new Map()
-        hints.set(DecodeHintType.TRY_HARDER, true)
-
-        const codeReader = new BrowserMultiFormatReader(hints, 200)
-        readerRef.current = codeReader
-
-        await codeReader.decodeFromVideoDevice(null, video, (result, err) => {
-          if (cancelled) return
-          if (err) {
-            if (err instanceof NotFoundException) return
-            return
-          }
-          if (!result) return
-          console.log('Raw scan result:', result.getText())
-          const upper = result.getText().toUpperCase()
-          const match = upper.match(SERIAL_PATTERN)
-          if (match) {
-            cancelled = true
-            codeReader.reset()
-            readerRef.current = null
-            isScanningRef.current = false
-            restorePlay?.()
-            restorePlay = null
-            onResultRef.current(match[0])
-            onCloseRef.current()
-          }
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
         })
+        if (cancelled) return
+
+        if (!document.getElementById(scannerId)) return
+
+        const html5QrCode = new Html5Qrcode(scannerId, {
+          verbose: false,
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.QR_CODE,
+          ],
+        })
+        scannerRef.current = html5QrCode
+
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox:
+              kategori === "front-load"
+                ? { width: 200, height: 300 }
+                : { width: 300, height: 200 },
+          },
+          (decodedText) => {
+            const upper = decodedText.toUpperCase()
+            const match = upper.match(SERIAL_PATTERN)
+            if (match) {
+              html5QrCode
+                .stop()
+                .then(() => {
+                  scannerRef.current = null
+                  onResultRef.current(match[0])
+                  onCloseRef.current()
+                })
+                .catch(() => {})
+            }
+          },
+          undefined
+        )
       } catch {
-        restorePlay?.()
-        restorePlay = null
         if (!cancelled) {
           setCameraError(
             "Tidak dapat mengakses kamera. Periksa izin peramban Anda."
           )
         }
-        isScanningRef.current = false
       }
     }
 
-    void start()
+    void run()
 
     return () => {
       cancelled = true
-      isScanningRef.current = false
-      restorePlay?.()
-      readerRef.current?.reset()
-      readerRef.current = null
+      scannerRef.current?.stop().catch(() => {})
+      scannerRef.current = null
     }
-  }, [isOpen])
+  }, [isOpen, kategori])
 
   const instruction =
     kategori === "front-load"
       ? "Arahkan ke stiker di SAMPING dus"
       : "Arahkan ke stiker di DEPAN dus"
 
-  const roiPortrait = kategori === "front-load"
-
   const handleOpenChange = (open: boolean) => {
     if (!open) {
-      isScanningRef.current = false
-      readerRef.current?.reset()
-      readerRef.current = null
+      scannerRef.current?.stop().catch(() => {})
+      scannerRef.current = null
       onClose()
     }
   }
@@ -195,30 +164,10 @@ export default function BarcodeScanner({
             </div>
           ) : (
             <>
-              <div className="relative min-h-0 flex-1 w-full">
-                <video
-                  ref={videoRef}
-                  className="absolute inset-0 h-full w-full object-cover"
-                  playsInline
-                  muted
-                />
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
-                  <div
-                    className={cn(
-                      "relative border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]",
-                      roiPortrait
-                        ? "aspect-[3/5] w-[38%] max-w-[220px]"
-                        : "aspect-[5/3] w-[78%] max-w-md"
-                    )}
-                  >
-                    <span className="absolute -top-0.5 -left-0.5 h-5 w-5 border-t-4 border-l-4 border-white" />
-                    <span className="absolute -top-0.5 -right-0.5 h-5 w-5 border-t-4 border-r-4 border-white" />
-                    <span className="absolute -bottom-0.5 -left-0.5 h-5 w-5 border-b-4 border-l-4 border-white" />
-                    <span className="absolute -right-0.5 -bottom-0.5 h-5 w-5 border-b-4 border-r-4 border-white" />
-                  </div>
-                </div>
-              </div>
-
+              <div
+                id={scannerId}
+                className="min-h-[min(100dvh,480px)] w-full flex-1"
+              />
               <div className="bg-background p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <p className="text-muted-foreground text-center text-sm">
                   {instruction}
