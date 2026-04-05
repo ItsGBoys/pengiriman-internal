@@ -30,6 +30,7 @@ export default function BarcodeScanner({
   const readerRef = useRef<{
     reset: () => void
   } | null>(null)
+  const isScanningRef = useRef(false)
   const onResultRef = useRef(onResult)
   const onCloseRef = useRef(onClose)
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -39,13 +40,18 @@ export default function BarcodeScanner({
 
   useEffect(() => {
     if (!isOpen) {
+      isScanningRef.current = false
       readerRef.current?.reset()
       readerRef.current = null
       setCameraError(null)
       return
     }
 
+    if (isScanningRef.current) return
+    isScanningRef.current = true
+
     let cancelled = false
+    let restorePlay: (() => void) | null = null
 
     const start = async () => {
       await new Promise<void>((resolve) => {
@@ -54,7 +60,10 @@ export default function BarcodeScanner({
       if (cancelled) return
 
       const video = videoRef.current
-      if (!video) return
+      if (!video) {
+        isScanningRef.current = false
+        return
+      }
 
       try {
         const {
@@ -63,7 +72,23 @@ export default function BarcodeScanner({
           NotFoundException,
         } = await import("@zxing/library")
 
-        if (cancelled) return
+        if (cancelled) {
+          isScanningRef.current = false
+          return
+        }
+
+        const origPlay = video.play.bind(video)
+        video.play = () => {
+          return (async () => {
+            try {
+              if (video.paused) await origPlay()
+            } catch (_) {}
+          })()
+        }
+        restorePlay = () => {
+          video.play = origPlay
+          restorePlay = null
+        }
 
         // Kamera belakang: deviceId null → ZXing memakai facingMode "environment"
         // (setara prefer kamera depan = false)
@@ -87,16 +112,22 @@ export default function BarcodeScanner({
             cancelled = true
             codeReader.reset()
             readerRef.current = null
+            isScanningRef.current = false
+            restorePlay?.()
+            restorePlay = null
             onResultRef.current(match[0])
             onCloseRef.current()
           }
         })
       } catch {
+        restorePlay?.()
+        restorePlay = null
         if (!cancelled) {
           setCameraError(
             "Tidak dapat mengakses kamera. Periksa izin peramban Anda."
           )
         }
+        isScanningRef.current = false
       }
     }
 
@@ -104,6 +135,8 @@ export default function BarcodeScanner({
 
     return () => {
       cancelled = true
+      isScanningRef.current = false
+      restorePlay?.()
       readerRef.current?.reset()
       readerRef.current = null
     }
@@ -118,6 +151,7 @@ export default function BarcodeScanner({
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
+      isScanningRef.current = false
       readerRef.current?.reset()
       readerRef.current = null
       onClose()
@@ -167,7 +201,6 @@ export default function BarcodeScanner({
                   className="absolute inset-0 h-full w-full object-cover"
                   playsInline
                   muted
-                  autoPlay
                 />
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
                   <div
