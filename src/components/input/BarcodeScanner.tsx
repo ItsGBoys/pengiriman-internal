@@ -39,11 +39,13 @@ export default function BarcodeScanner({
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [scannedList, setScannedList] = useState<string[]>([])
   const [scanFeedback, setScanFeedback] = useState<string | null>(null)
+  const [showList, setShowList] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
       setScannedList([])
       scannedListRef.current = []
+      setShowList(false)
       setScanFeedback(null)
       cooldownUntilRef.current = 0
       if (feedbackTimeoutRef.current) {
@@ -184,7 +186,7 @@ export default function BarcodeScanner({
     onClose()
   }
 
-  const countLabel = `${scannedList.length} nomor seri ditambahkan`
+  const n = scannedList.length
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
@@ -241,17 +243,15 @@ export default function BarcodeScanner({
                   </p>
                 ) : null}
 
-                <p className="text-foreground text-center text-sm font-medium">
-                  {countLabel}
-                </p>
-
-                <ul className="border-border max-h-32 min-h-0 divide-y overflow-y-auto rounded-md border text-sm">
-                  {scannedList.length === 0 ? (
-                    <li className="text-muted-foreground px-3 py-2 text-center text-xs">
-                      Belum ada nomor seri di sesi ini.
-                    </li>
-                  ) : (
-                    scannedList.map((sn, i) => (
+                <div
+                  className={cn(
+                    "overflow-hidden transition-[max-height] duration-200 ease-in-out",
+                    showList && n > 0 ? "max-h-40" : "max-h-0"
+                  )}
+                  aria-hidden={!showList || n === 0}
+                >
+                  <ul className="border-border max-h-40 divide-y overflow-y-auto rounded-md border text-sm">
+                    {scannedList.map((sn, i) => (
                       <li
                         key={`${sn}-${i}`}
                         className="flex items-center justify-between gap-2 px-2 py-1.5"
@@ -270,19 +270,33 @@ export default function BarcodeScanner({
                           <X className="size-4" />
                         </Button>
                       </li>
-                    ))
-                  )}
-                </ul>
+                    ))}
+                  </ul>
+                </div>
+
+                {n > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowList((v) => !v)}
+                    className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 w-full rounded-full px-4 py-2 text-center text-sm font-medium text-white transition-colors"
+                  >
+                    {n} terscan {showList ? "▲" : "▼"}
+                  </button>
+                ) : null}
 
                 <div className="flex justify-end pt-1">
                   <Button
                     type="button"
                     size="lg"
-                    className="min-w-[10rem]"
-                    disabled={scannedList.length === 0}
+                    className={cn(
+                      "min-w-[10rem]",
+                      n > 0 &&
+                        "bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600"
+                    )}
+                    disabled={n === 0}
                     onClick={handleSelesai}
                   >
-                    Selesai ({scannedList.length})
+                    {n > 0 ? `Selesai (${n})` : "Selesai"}
                   </Button>
                 </div>
               </div>
