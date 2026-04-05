@@ -41,23 +41,48 @@ export default function BarcodeScanner({
   const [scanFeedback, setScanFeedback] = useState<string | null>(null)
   const [showList, setShowList] = useState(false)
 
+  const badgePopupWrapRef = useRef<HTMLDivElement>(null)
+  const popupPanelRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
-    if (isOpen) {
-      setScannedList([])
-      scannedListRef.current = []
+    if (!isOpen) {
       setShowList(false)
-      setScanFeedback(null)
-      cooldownUntilRef.current = 0
-      if (feedbackTimeoutRef.current) {
-        clearTimeout(feedbackTimeoutRef.current)
-        feedbackTimeoutRef.current = null
-      }
+      return
+    }
+    setScannedList([])
+    scannedListRef.current = []
+    setShowList(false)
+    setScanFeedback(null)
+    cooldownUntilRef.current = 0
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current)
+      feedbackTimeoutRef.current = null
     }
   }, [isOpen])
 
   useEffect(() => {
     scannedListRef.current = scannedList
   }, [scannedList])
+
+  useEffect(() => {
+    if (scannedList.length === 0) {
+      setShowList(false)
+    }
+  }, [scannedList.length])
+
+  useEffect(() => {
+    if (!showList) return
+
+    function handlePointerDown(e: PointerEvent) {
+      const t = e.target as Node
+      if (popupPanelRef.current?.contains(t)) return
+      if (badgePopupWrapRef.current?.contains(t)) return
+      setShowList(false)
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown)
+    return () => document.removeEventListener("pointerdown", handlePointerDown)
+  }, [showList])
 
   useEffect(() => {
     if (!isOpen) {
@@ -164,6 +189,7 @@ export default function BarcodeScanner({
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
+      setShowList(false)
       scannerRef.current?.stop().catch(() => {})
       scannerRef.current = null
       onClose()
@@ -243,45 +269,52 @@ export default function BarcodeScanner({
                   </p>
                 ) : null}
 
-                <div
-                  className={cn(
-                    "overflow-hidden transition-[max-height] duration-200 ease-in-out",
-                    showList && n > 0 ? "max-h-40" : "max-h-0"
-                  )}
-                  aria-hidden={!showList || n === 0}
-                >
-                  <ul className="border-border max-h-40 divide-y overflow-y-auto rounded-md border text-sm">
-                    {scannedList.map((sn, i) => (
-                      <li
-                        key={`${sn}-${i}`}
-                        className="flex items-center justify-between gap-2 px-2 py-1.5"
-                      >
-                        <span className="font-mono text-xs break-all">
-                          {sn}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive hover:text-destructive size-8 shrink-0"
-                          aria-label={`Hapus ${sn}`}
-                          onClick={() => removeScannedAt(i)}
-                        >
-                          <X className="size-4" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
                 {n > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowList((v) => !v)}
-                    className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 w-full rounded-full px-4 py-2 text-center text-sm font-medium text-white transition-colors"
-                  >
-                    {n} terscan {showList ? "▲" : "▼"}
-                  </button>
+                  <div ref={badgePopupWrapRef} className="relative z-30 w-full">
+                    {showList ? (
+                      <div
+                        ref={popupPanelRef}
+                        className={cn(
+                          "border-border bg-background absolute bottom-full left-1/2 z-30 mb-2 w-[260px] max-h-[220px] -translate-x-1/2 overflow-y-auto rounded-lg border p-3 shadow-lg"
+                        )}
+                        role="dialog"
+                        aria-label="Daftar nomor seri terscan"
+                      >
+                        <p className="text-muted-foreground mb-2 text-xs font-medium">
+                          Nomor seri terscan
+                        </p>
+                        <div className="flex flex-col gap-1">
+                          {scannedList.map((sn, i) => (
+                            <div
+                              key={`${sn}-${i}`}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <span className="font-mono text-sm break-all">
+                                {sn}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive hover:text-destructive size-8 shrink-0"
+                                aria-label={`Hapus ${sn}`}
+                                onClick={() => removeScannedAt(i)}
+                              >
+                                <X className="size-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setShowList((v) => !v)}
+                      className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 w-full rounded-full px-4 py-2 text-center text-sm font-medium text-white transition-colors"
+                    >
+                      {n} terscan {showList ? "▲" : "▼"}
+                    </button>
+                  </div>
                 ) : null}
 
                 <div className="flex justify-end pt-1">
