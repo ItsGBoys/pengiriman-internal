@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { X } from "lucide-react"
 import type { Html5Qrcode } from "html5-qrcode"
 
 import { Button } from "@/components/ui/button"
@@ -14,11 +15,13 @@ import { cn } from "@/lib/utils"
 
 const scannerId = "barcode-scanner-container"
 const SERIAL_PATTERN = /\b\d{2}[0-9OND]\d{7}\b/
+const SCAN_COOLDOWN_MS = 1500
+const FEEDBACK_CLEAR_MS = 2000
 
 export interface BarcodeScannerProps {
   isOpen: boolean
   onClose: () => void
-  onResult: (serialNumber: string) => void
+  onResult: (serialNumbers: string[]) => void
   kategori: "front-load" | "top-load"
 }
 
@@ -29,12 +32,30 @@ export default function BarcodeScanner({
   kategori,
 }: BarcodeScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null)
-  const onResultRef = useRef(onResult)
-  const onCloseRef = useRef(onClose)
-  const [cameraError, setCameraError] = useState<string | null>(null)
+  const scannedListRef = useRef<string[]>([])
+  const cooldownUntilRef = useRef(0)
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  onResultRef.current = onResult
-  onCloseRef.current = onClose
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [scannedList, setScannedList] = useState<string[]>([])
+  const [scanFeedback, setScanFeedback] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (isOpen) {
+      setScannedList([])
+      scannedListRef.current = []
+      setScanFeedback(null)
+      cooldownUntilRef.current = 0
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current)
+        feedbackTimeoutRef.current = null
+      }
+    }
+  }, [isOpen])
+
+  useEffect(() => {
+    scannedListRef.current = scannedList
+  }, [scannedList])
 
   useEffect(() => {
     if (!isOpen) {
@@ -81,18 +102,34 @@ export default function BarcodeScanner({
                 : { width: 300, height: 200 },
           },
           (decodedText) => {
+            if (cancelled) return
+            if (Date.now() < cooldownUntilRef.current) return
+
             const upper = decodedText.toUpperCase()
             const match = upper.match(SERIAL_PATTERN)
-            if (match) {
-              html5QrCode
-                .stop()
-                .then(() => {
-                  scannerRef.current = null
-                  onResultRef.current(match[0])
-                  onCloseRef.current()
-                })
-                .catch(() => {})
+            if (!match) return
+
+            const sn = match[0]
+            const key = sn.toLowerCase()
+            if (
+              scannedListRef.current.some((s) => s.toLowerCase() === key)
+            ) {
+              return
             }
+
+            const next = [...scannedListRef.current, sn]
+            scannedListRef.current = next
+            setScannedList(next)
+            cooldownUntilRef.current = Date.now() + SCAN_COOLDOWN_MS
+            setScanFeedback(`✓ ${sn} ditambahkan`)
+
+            if (feedbackTimeoutRef.current) {
+              clearTimeout(feedbackTimeoutRef.current)
+            }
+            feedbackTimeoutRef.current = setTimeout(() => {
+              setScanFeedback(null)
+              feedbackTimeoutRef.current = null
+            }, FEEDBACK_CLEAR_MS)
           },
           undefined
         )
@@ -109,6 +146,10 @@ export default function BarcodeScanner({
 
     return () => {
       cancelled = true
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current)
+        feedbackTimeoutRef.current = null
+      }
       scannerRef.current?.stop().catch(() => {})
       scannerRef.current = null
     }
@@ -127,6 +168,24 @@ export default function BarcodeScanner({
     }
   }
 
+  function removeScannedAt(index: number) {
+    setScannedList((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      scannedListRef.current = next
+      return next
+    })
+  }
+
+  function handleSelesai() {
+    if (scannedList.length === 0) return
+    scannerRef.current?.stop().catch(() => {})
+    scannerRef.current = null
+    onResult([...scannedList])
+    onClose()
+  }
+
+  const countLabel = `${scannedList.length} nomor seri ditambahkan`
+
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent
@@ -141,7 +200,8 @@ export default function BarcodeScanner({
       >
         <DialogTitle className="sr-only">Pindai barcode nomor seri</DialogTitle>
         <DialogDescription className="sr-only">
-          Arahkan kamera ke barcode pada stiker produk hingga nomor terbaca otomatis.
+          Pindai beberapa nomor seri dalam satu sesi, lalu ketuk Selesai untuk
+          menambahkan ke formulir.
         </DialogDescription>
 
         <div className="relative flex min-h-0 flex-1 flex-col bg-black">
@@ -168,13 +228,63 @@ export default function BarcodeScanner({
                 id={scannerId}
                 className="min-h-[min(100dvh,480px)] w-full flex-1"
               />
-              <div className="bg-background p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <div className="bg-background flex max-h-[45vh] min-h-0 flex-col gap-3 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <p className="text-muted-foreground text-center text-sm">
                   {instruction}
                 </p>
-                <p className="text-muted-foreground mt-2 text-center text-xs">
+                <p className="text-muted-foreground text-center text-xs">
                   Memindai otomatis… arahkan barcode ke dalam kotak
                 </p>
+                {scanFeedback ? (
+                  <p className="text-center text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                    {scanFeedback}
+                  </p>
+                ) : null}
+
+                <p className="text-foreground text-center text-sm font-medium">
+                  {countLabel}
+                </p>
+
+                <ul className="border-border max-h-32 min-h-0 divide-y overflow-y-auto rounded-md border text-sm">
+                  {scannedList.length === 0 ? (
+                    <li className="text-muted-foreground px-3 py-2 text-center text-xs">
+                      Belum ada nomor seri di sesi ini.
+                    </li>
+                  ) : (
+                    scannedList.map((sn, i) => (
+                      <li
+                        key={`${sn}-${i}`}
+                        className="flex items-center justify-between gap-2 px-2 py-1.5"
+                      >
+                        <span className="font-mono text-xs break-all">
+                          {sn}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive size-8 shrink-0"
+                          aria-label={`Hapus ${sn}`}
+                          onClick={() => removeScannedAt(i)}
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+
+                <div className="flex justify-end pt-1">
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="min-w-[10rem]"
+                    disabled={scannedList.length === 0}
+                    onClick={handleSelesai}
+                  >
+                    Selesai ({scannedList.length})
+                  </Button>
+                </div>
               </div>
             </>
           )}

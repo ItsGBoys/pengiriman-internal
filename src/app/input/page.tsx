@@ -265,12 +265,10 @@ export default function InputPengirimanPage() {
     )
   }
 
-  function handleBarcodeResult(serialNumber: string) {
+  function handleBarcodeResult(serialNumbers: string[]) {
     const st = scannerStateRef.current
     if (!st?.open) return
     const lineId = st.lineId
-    const sn = serialNumber.trim()
-    const key = sn.toLowerCase()
     const prev = barisRef.current
 
     const seen = new Map<string, string>()
@@ -279,18 +277,51 @@ export default function InputPengirimanPage() {
         seen.set(raw.trim().toLowerCase(), b.tipe)
       }
     }
-    if (seen.has(key)) {
-      setFormError(
-        `Nomor seri "${sn}" duplikat (juga muncul pada tipe "${seen.get(key)}"). Satu pengiriman tidak boleh memuat nomor seri yang sama.`
-      )
-      return
+
+    const toAdd: string[] = []
+    const skipped: string[] = []
+
+    for (const raw of serialNumbers) {
+      const sn = raw.trim()
+      if (!sn) continue
+      const key = sn.toLowerCase()
+      if (seen.has(key)) {
+        skipped.push(sn)
+        continue
+      }
+      const lineTipe = prev.find((b) => b.id === lineId)?.tipe ?? ""
+      seen.set(key, lineTipe)
+      toAdd.push(sn)
     }
 
-    setFormError(null)
-    const row = prev.find((b) => b.id === lineId)
-    updateBaris(lineId, {
-      serials: [...(row?.serials ?? []), sn],
-    })
+    if (toAdd.length > 0) {
+      const row = prev.find((b) => b.id === lineId)
+      updateBaris(lineId, {
+        serials: [...(row?.serials ?? []), ...toAdd],
+      })
+      setSuccessMsg(
+        `${toAdd.length} nomor seri berhasil ditambahkan.`
+      )
+    } else {
+      setSuccessMsg(null)
+    }
+
+    if (skipped.length > 0) {
+      const dupDetail = skipped
+        .map((sn) => {
+          const t = seen.get(sn.toLowerCase())
+          return `"${sn}" (tipe "${t ?? "—"}")`
+        })
+        .join(", ")
+      const totalInput = serialNumbers.filter((s) => s.trim()).length
+      setFormError(
+        toAdd.length === 0 && skipped.length === totalInput
+          ? `Nomor seri berikut sudah terdaftar: ${dupDetail}.`
+          : `Nomor duplikat dilewati: ${dupDetail}.`
+      )
+    } else if (toAdd.length > 0) {
+      setFormError(null)
+    }
   }
 
   return (
