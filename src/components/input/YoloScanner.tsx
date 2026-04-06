@@ -630,6 +630,7 @@ export default function YoloScanner({
                         canvasH: dh,
                       }
                     )
+                    alert(`Crop size: ${cropCanvas.width}x${cropCanvas.height}`)
 
                     let match: RegExpMatchArray | null = null
 
@@ -643,10 +644,13 @@ export default function YoloScanner({
                       match = res.decodedText
                         .toUpperCase()
                         .match(SERIAL_PATTERN)
-                    } catch (cropErr) {
+                    } catch (cropErr: any) {
                       console.log(
                         "[YoloScanner] scanFileV2 (crop) error:",
                         cropErr
+                      )
+                      alert(
+                        `Decode error: ${cropErr?.message || String(cropErr)}`
                       )
                       decoder.clear()
                     }
@@ -682,10 +686,13 @@ export default function YoloScanner({
                         match = resFull.decodedText
                           .toUpperCase()
                           .match(SERIAL_PATTERN)
-                      } catch (fullErr) {
+                      } catch (fullErr: any) {
                         console.log(
                           "[YoloScanner] scanFileV2 (full frame) error:",
                           fullErr
+                        )
+                        alert(
+                          `Fallback error: ${fullErr?.message || String(fullErr)}`
                         )
                         decoder.clear()
                       }
