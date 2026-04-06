@@ -423,6 +423,8 @@ export default function YoloScanner({
 
     let cancelled = false
 
+    const videoEl = videoRef.current
+
     const start = async () => {
       try {
         await new Promise<void>((resolve) => {
@@ -461,7 +463,7 @@ export default function YoloScanner({
         }
         streamRef.current = stream
 
-        const video = videoRef.current
+        const video = videoEl
         if (!video) {
           stream.getTracks().forEach((t) => t.stop())
           return
@@ -596,12 +598,6 @@ export default function YoloScanner({
                 const best = inVideo.reduce((a, b) =>
                   a.score >= b.score ? a : b
                 )
-                const bboxOrigW = best.x2 - best.x1
-                const bboxOrigH = best.y2 - best.y1
-                console.log("[YoloScanner] bbox asli (video px):", {
-                  w: bboxOrigW,
-                  h: bboxOrigH,
-                })
 
                 const pad = expandBox(best, vw, vh, CROP_PADDING_FRAC)
                 const x1 = Math.max(0, Math.floor(pad.x1))
@@ -621,17 +617,6 @@ export default function YoloScanner({
                     cctx.imageSmoothingEnabled = false
                     cctx.drawImage(video, x1, y1, cw, ch, 0, 0, dw, dh)
 
-                    console.log(
-                      "[YoloScanner] crop (video px) → kanvas dekode:",
-                      {
-                        cropW: cw,
-                        cropH: ch,
-                        canvasW: dw,
-                        canvasH: dh,
-                      }
-                    )
-                    alert(`Crop size: ${cropCanvas.width}x${cropCanvas.height}`)
-
                     let match: RegExpMatchArray | null = null
 
                     try {
@@ -644,14 +629,7 @@ export default function YoloScanner({
                       match = res.decodedText
                         .toUpperCase()
                         .match(SERIAL_PATTERN)
-                    } catch (cropErr: any) {
-                      console.log(
-                        "[YoloScanner] scanFileV2 (crop) error:",
-                        cropErr
-                      )
-                      alert(
-                        `Decode error: ${cropErr?.message || String(cropErr)}`
-                      )
+                    } catch {
                       decoder.clear()
                     }
 
@@ -665,15 +643,6 @@ export default function YoloScanner({
                         cropCanvas.height = fh
                         cctx.imageSmoothingEnabled = false
                         cctx.drawImage(video, 0, 0, vw, vh, 0, 0, fw, fh)
-                        console.log(
-                          "[YoloScanner] fallback full frame → kanvas:",
-                          {
-                            videoW: vw,
-                            videoH: vh,
-                            canvasW: fw,
-                            canvasH: fh,
-                          }
-                        )
                         const blobFull = await canvasToBlob(cropCanvas)
                         const fileFull = new File([blobFull], "fullframe.png", {
                           type: "image/png",
@@ -686,14 +655,7 @@ export default function YoloScanner({
                         match = resFull.decodedText
                           .toUpperCase()
                           .match(SERIAL_PATTERN)
-                      } catch (fullErr: any) {
-                        console.log(
-                          "[YoloScanner] scanFileV2 (full frame) error:",
-                          fullErr
-                        )
-                        alert(
-                          `Fallback error: ${fullErr?.message || String(fullErr)}`
-                        )
+                      } catch {
                         decoder.clear()
                       }
                     }
@@ -753,8 +715,7 @@ export default function YoloScanner({
       decodingRef.current = false
       decoderRef.current?.clear()
       decoderRef.current = null
-      const v = videoRef.current
-      if (v) v.srcObject = null
+      if (videoEl) videoEl.srcObject = null
       if (feedbackTimeoutRef.current) {
         clearTimeout(feedbackTimeoutRef.current)
         feedbackTimeoutRef.current = null
