@@ -21,6 +21,8 @@ const FEEDBACK_CLEAR_MS = 2000
 const YOLO_CONF_THRESHOLD = 0.5
 const DECODE_INTERVAL_MS = 280
 const NMS_IOU = 0.45
+const CROP_PADDING_FRAC = 0.2
+const DECODE_MIN_EDGE_PX = 300
 
 export interface YoloScannerProps {
   isOpen: boolean
@@ -283,6 +285,21 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
       "image/png"
     )
   })
+}
+
+/** Minimal DECODE_MIN_EDGE_PX pada kedua sisi kanvas (setara ≥300×300 setelah upscale). */
+function dimensionsForDecodeCanvas(sourceW: number, sourceH: number) {
+  const cw = Math.max(1, sourceW)
+  const ch = Math.max(1, sourceH)
+  const scale = Math.max(
+    DECODE_MIN_EDGE_PX / cw,
+    DECODE_MIN_EDGE_PX / ch,
+    1
+  )
+  return {
+    dw: Math.round(cw * scale),
+    dh: Math.round(ch * scale),
+  }
 }
 
 export default function YoloScanner({
@@ -579,7 +596,14 @@ export default function YoloScanner({
                 const best = inVideo.reduce((a, b) =>
                   a.score >= b.score ? a : b
                 )
-                const pad = expandBox(best, vw, vh, 0.1)
+                const bboxOrigW = best.x2 - best.x1
+                const bboxOrigH = best.y2 - best.y1
+                console.log("[YoloScanner] bbox asli (video px):", {
+                  w: bboxOrigW,
+                  h: bboxOrigH,
+                })
+
+                const pad = expandBox(best, vw, vh, CROP_PADDING_FRAC)
                 const x1 = Math.max(0, Math.floor(pad.x1))
                 const y1 = Math.max(0, Math.floor(pad.y1))
                 const x2 = Math.min(vw, Math.ceil(pad.x2))
@@ -589,49 +613,108 @@ export default function YoloScanner({
 
                 decodingRef.current = true
                 try {
-                  const minDecode = 280
-                  const scale = Math.max(1, minDecode / Math.max(cw, ch))
-                  const dw = Math.round(cw * scale)
-                  const dh = Math.round(ch * scale)
-                  cropCanvas.width = dw
-                  cropCanvas.height = dh
                   const cctx = cropCanvas.getContext("2d")
                   if (cctx) {
-                    cctx.imageSmoothingEnabled = true
+                    const { dw, dh } = dimensionsForDecodeCanvas(cw, ch)
+                    cropCanvas.width = dw
+                    cropCanvas.height = dh
+                    cctx.imageSmoothingEnabled = false
                     cctx.drawImage(video, x1, y1, cw, ch, 0, 0, dw, dh)
-                  }
-                  const blob = await canvasToBlob(cropCanvas)
-                  const file = new File([blob], "crop.png", {
-                    type: "image/png",
-                  })
-                  const res = await decoder.scanFileV2(file, false)
-                  decoder.clear()
-                  const upper = res.decodedText.toUpperCase()
-                  const match = upper.match(SERIAL_PATTERN)
-                  if (match && !cancelled) {
-                    const sn = match[0]
-                    const key = sn.toLowerCase()
-                    if (
-                      !scannedListRef.current.some(
-                        (s) => s.toLowerCase() === key
-                      )
-                    ) {
-                      const next = [...scannedListRef.current, sn]
-                      scannedListRef.current = next
-                      setScannedList(next)
-                      cooldownUntilRef.current = Date.now() + SCAN_COOLDOWN_MS
-                      setScanFeedback(`✓ ${sn} ditambahkan`)
-                      if (feedbackTimeoutRef.current) {
-                        clearTimeout(feedbackTimeoutRef.current)
+
+                    console.log(
+                      "[YoloScanner] crop (video px) → kanvas dekode:",
+                      {
+                        cropW: cw,
+                        cropH: ch,
+                        canvasW: dw,
+                        canvasH: dh,
                       }
-                      feedbackTimeoutRef.current = setTimeout(() => {
-                        setScanFeedback(null)
-                        feedbackTimeoutRef.current = null
-                      }, FEEDBACK_CLEAR_MS)
+                    )
+
+                    let match: RegExpMatchArray | null = null
+
+                    try {
+                      const blob = await canvasToBlob(cropCanvas)
+                      const file = new File([blob], "crop.png", {
+                        type: "image/png",
+                      })
+                      const res = await decoder.scanFileV2(file, false)
+                      decoder.clear()
+                      match = res.decodedText
+                        .toUpperCase()
+                        .match(SERIAL_PATTERN)
+                    } catch (cropErr) {
+                      console.log(
+                        "[YoloScanner] scanFileV2 (crop) error:",
+                        cropErr
+                      )
+                      decoder.clear()
+                    }
+
+                    if (!match) {
+                      try {
+                        const { dw: fw, dh: fh } = dimensionsForDecodeCanvas(
+                          vw,
+                          vh
+                        )
+                        cropCanvas.width = fw
+                        cropCanvas.height = fh
+                        cctx.imageSmoothingEnabled = false
+                        cctx.drawImage(video, 0, 0, vw, vh, 0, 0, fw, fh)
+                        console.log(
+                          "[YoloScanner] fallback full frame → kanvas:",
+                          {
+                            videoW: vw,
+                            videoH: vh,
+                            canvasW: fw,
+                            canvasH: fh,
+                          }
+                        )
+                        const blobFull = await canvasToBlob(cropCanvas)
+                        const fileFull = new File([blobFull], "fullframe.png", {
+                          type: "image/png",
+                        })
+                        const resFull = await decoder.scanFileV2(
+                          fileFull,
+                          false
+                        )
+                        decoder.clear()
+                        match = resFull.decodedText
+                          .toUpperCase()
+                          .match(SERIAL_PATTERN)
+                      } catch (fullErr) {
+                        console.log(
+                          "[YoloScanner] scanFileV2 (full frame) error:",
+                          fullErr
+                        )
+                        decoder.clear()
+                      }
+                    }
+
+                    if (match && !cancelled) {
+                      const sn = match[0]
+                      const key = sn.toLowerCase()
+                      if (
+                        !scannedListRef.current.some(
+                          (s) => s.toLowerCase() === key
+                        )
+                      ) {
+                        const next = [...scannedListRef.current, sn]
+                        scannedListRef.current = next
+                        setScannedList(next)
+                        cooldownUntilRef.current =
+                          Date.now() + SCAN_COOLDOWN_MS
+                        setScanFeedback(`✓ ${sn} ditambahkan`)
+                        if (feedbackTimeoutRef.current) {
+                          clearTimeout(feedbackTimeoutRef.current)
+                        }
+                        feedbackTimeoutRef.current = setTimeout(() => {
+                          setScanFeedback(null)
+                          feedbackTimeoutRef.current = null
+                        }, FEEDBACK_CLEAR_MS)
+                      }
                     }
                   }
-                } catch {
-                  decoder.clear()
                 } finally {
                   decodingRef.current = false
                 }
