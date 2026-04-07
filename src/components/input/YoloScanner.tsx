@@ -428,10 +428,23 @@ export default function YoloScanner({
     setCameraReady(false)
     setDebugMsg("Memulai kamera...")
 
-    const videoEl = videoRef.current
+    const waitForVideoEl = () =>
+      new Promise<HTMLVideoElement>((resolve, reject) => {
+        let tries = 0
+        const tick = () => {
+          if (cancelled) return reject(new Error("cancelled"))
+          const el = videoRef.current
+          if (el) return resolve(el)
+          tries++
+          if (tries > 90) return reject(new Error("video element tidak siap"))
+          requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })
 
     const startCamera = async () => {
       try {
+        const videoEl = await waitForVideoEl()
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
           audio: false,
@@ -442,17 +455,19 @@ export default function YoloScanner({
         }
         streamRef.current = stream
 
-        if (!videoEl) {
-          stream.getTracks().forEach((t) => t.stop())
-          return
-        }
         videoEl.srcObject = stream
         videoEl.setAttribute("playsinline", "true")
+        // beberapa perangkat lebih stabil memakai property juga
+        ;(videoEl as HTMLVideoElement).playsInline = true
         videoEl.muted = true
         const markReady = () => {
           if (cancelled) return
           setCameraReady(true)
-          setDebugMsg("Kamera siap, memuat model...")
+          const track = stream.getVideoTracks()[0]
+          const settings = track?.getSettings?.()
+          const w = settings?.width ?? videoEl.videoWidth
+          const h = settings?.height ?? videoEl.videoHeight
+          setDebugMsg(`Kamera siap, memuat model... (${w}x${h})`)
         }
         videoEl.addEventListener("loadedmetadata", markReady, { once: true })
         videoEl.addEventListener("playing", markReady, { once: true })
@@ -475,12 +490,16 @@ export default function YoloScanner({
         return () => {
           c.cancelled = true
         }
-      } catch {
+      } catch (e: unknown) {
         if (!cancelled) {
           setCameraError(
             "Tidak dapat mengakses kamera. Periksa izin peramban Anda."
           )
-          setDebugMsg("Error: tidak dapat mengakses kamera")
+          setDebugMsg(
+            `Error: ${
+              e instanceof Error ? e.message : String(e)
+            }`
+          )
         }
       }
     }
@@ -502,7 +521,8 @@ export default function YoloScanner({
       streamRef.current = null
       decoderRef.current?.clear()
       decoderRef.current = null
-      if (videoEl) videoEl.srcObject = null
+      const v = videoRef.current
+      if (v) v.srcObject = null
     }
   }, [isOpen])
 
