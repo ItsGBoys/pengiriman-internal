@@ -328,9 +328,11 @@ export default function YoloScanner({
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastDecodeAttemptRef = useRef(0)
   const decodingRef = useRef(false)
+  const loadModelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
+  const [cameraReady, setCameraReady] = useState(false)
   const [modelReady, setModelReady] = useState(false)
   const [modelLoading, setModelLoading] = useState(true)
   const [scannedList, setScannedList] = useState<string[]>([])
@@ -341,30 +343,30 @@ export default function YoloScanner({
   const badgePopupWrapRef = useRef<HTMLDivElement>(null)
   const popupPanelRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    let cancelled = false
+  const loadModel = async (cancelledRef: { cancelled: boolean }) => {
+    if (modelReady || modelLoading) return
     setModelLoading(true)
     setModelError(null)
-    getYoloSession()
-      .then((session) => {
-        if (cancelled) return
-        sessionRef.current = session
-        inputSizeRef.current = cachedInputSize ?? 512
-        setModelReady(true)
-        setModelLoading(false)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setModelError(
-          "Gagal memuat model deteksi. Periksa jaringan atau muat ulang halaman."
-        )
-        setModelReady(false)
-        setModelLoading(false)
-      })
-    return () => {
-      cancelled = true
+    try {
+      const session = await getYoloSession()
+      if (cancelledRef.cancelled) return
+      sessionRef.current = session
+      inputSizeRef.current = cachedInputSize ?? 512
+      setModelReady(true)
+      setModelLoading(false)
+      setDebugMsg((prev) =>
+        prev === "Kamera siap, memuat model..." ? "Siap scan!" : prev
+      )
+    } catch {
+      if (cancelledRef.cancelled) return
+      setModelError(
+        "Gagal memuat model deteksi. Periksa jaringan atau muat ulang halaman."
+      )
+      setModelReady(false)
+      setModelLoading(false)
+      setDebugMsg("Error: gagal memuat model")
     }
-  }, [])
+  }
 
   useEffect(() => {
     if (!isOpen) {
@@ -376,6 +378,7 @@ export default function YoloScanner({
     setShowList(false)
     setScanFeedback(null)
     setDebugMsg("")
+    setCameraReady(false)
     cooldownUntilRef.current = 0
     lastDecodeAttemptRef.current = 0
     if (feedbackTimeoutRef.current) {
@@ -410,20 +413,99 @@ export default function YoloScanner({
 
   useEffect(() => {
     if (!isOpen) {
+      // cleanup ditangani oleh effect masing-masing (kamera/model/loop)
+      return
+    }
+  }, [isOpen])
+
+  // Kamera: start segera saat modal dibuka (tanpa menunggu model).
+  useEffect(() => {
+    if (!isOpen) return
+
+    let cancelled = false
+    setCameraError(null)
+    setCameraReady(false)
+    setDebugMsg("Memulai kamera...")
+
+    const videoEl = videoRef.current
+
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: false,
+        })
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+        streamRef.current = stream
+
+        if (!videoEl) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+        videoEl.srcObject = stream
+        videoEl.setAttribute("playsinline", "true")
+        videoEl.muted = true
+        await videoEl.play()
+        if (cancelled) return
+
+        setCameraReady(true)
+        setDebugMsg("Kamera siap, memuat model...")
+
+        if (loadModelTimeoutRef.current) {
+          clearTimeout(loadModelTimeoutRef.current)
+          loadModelTimeoutRef.current = null
+        }
+        const c = { cancelled: false }
+        loadModelTimeoutRef.current = setTimeout(() => {
+          void loadModel(c)
+        }, 1000)
+
+        // pastikan dibatalkan saat cleanup effect kamera
+        return () => {
+          c.cancelled = true
+        }
+      } catch {
+        if (!cancelled) {
+          setCameraError(
+            "Tidak dapat mengakses kamera. Periksa izin peramban Anda."
+          )
+          setDebugMsg("Error: tidak dapat mengakses kamera")
+        }
+      }
+    }
+
+    let cancelModelLoadCleanup: (() => void) | undefined
+    void startCamera().then((cleanup) => {
+      cancelModelLoadCleanup = cleanup
+    })
+
+    return () => {
+      cancelled = true
+      cancelModelLoadCleanup?.()
+      if (loadModelTimeoutRef.current) {
+        clearTimeout(loadModelTimeoutRef.current)
+        loadModelTimeoutRef.current = null
+      }
       activeLoopRef.current = false
       streamRef.current?.getTracks().forEach((t) => t.stop())
       streamRef.current = null
       decoderRef.current?.clear()
       decoderRef.current = null
-      const v = videoRef.current
-      if (v) v.srcObject = null
-      setCameraError(null)
-      return
+      if (videoEl) videoEl.srcObject = null
     }
+  }, [isOpen])
 
+  // Inference loop: hanya jalan setelah kamera dan model siap.
+  useEffect(() => {
+    if (!isOpen) return
+    if (!cameraReady) return
     if (!modelReady || modelError) return
 
     let cancelled = false
+    setDebugMsg("Siap scan!")
 
     const videoEl = videoRef.current
 
@@ -455,26 +537,6 @@ export default function YoloScanner({
         })
         decoderRef.current = decoder
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-          audio: false,
-        })
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop())
-          return
-        }
-        streamRef.current = stream
-
-        const video = videoEl
-        if (!video) {
-          stream.getTracks().forEach((t) => t.stop())
-          return
-        }
-        video.srcObject = stream
-        video.setAttribute("playsinline", "true")
-        video.muted = true
-        await video.play()
-
         const ort = await import("onnxruntime-web")
         const inputSize = inputSizeRef.current
         const pre = preCanvasRef.current
@@ -487,17 +549,16 @@ export default function YoloScanner({
         const floatBuf = new Float32Array(1 * 3 * inputSize * inputSize)
 
         const waitRaf = () =>
-          new Promise<void>((resolve) =>
-            requestAnimationFrame(() => resolve())
-          )
+          new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
         const inferenceLoop = async () => {
+          if (!videoEl) return
           while (activeLoopRef.current && !cancelled) {
             await waitRaf()
             if (!activeLoopRef.current || cancelled) break
 
-            const vw = video.videoWidth
-            const vh = video.videoHeight
+            const vw = videoEl.videoWidth
+            const vh = videoEl.videoHeight
             const overlay = overlayRef.current
             const wrap = wrapRef.current
             const cropCanvas = cropCanvasRef.current
@@ -505,7 +566,7 @@ export default function YoloScanner({
             if (
               vw <= 0 ||
               vh <= 0 ||
-              video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+              videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
               !overlay ||
               !wrap
             ) {
@@ -513,7 +574,7 @@ export default function YoloScanner({
             }
 
             try {
-              preCtx.drawImage(video, 0, 0, inputSize, inputSize)
+              preCtx.drawImage(videoEl, 0, 0, inputSize, inputSize)
               const img = preCtx.getImageData(0, 0, inputSize, inputSize)
               const p = img.data
               const area = inputSize * inputSize
@@ -617,11 +678,9 @@ export default function YoloScanner({
                     cropCanvas.width = dw
                     cropCanvas.height = dh
                     cctx.imageSmoothingEnabled = false
-                    cctx.drawImage(video, x1, y1, cw, ch, 0, 0, dw, dh)
+                    cctx.drawImage(videoEl, x1, y1, cw, ch, 0, 0, dw, dh)
 
-                    setDebugMsg(
-                      `Crop: ${cropCanvas.width}x${cropCanvas.height}`
-                    )
+                    setDebugMsg(`Crop: ${cropCanvas.width}x${cropCanvas.height}`)
 
                     let match: RegExpMatchArray | null = null
 
@@ -638,11 +697,13 @@ export default function YoloScanner({
                         .match(SERIAL_PATTERN)
                     } catch (cropErr: unknown) {
                       decoder.clear()
-                      const errText =
-                        cropErr instanceof Error
-                          ? cropErr.message
-                          : String(cropErr)
-                      setDebugMsg(`Err: ${errText}`)
+                      setDebugMsg(
+                        `Err: ${
+                          cropErr instanceof Error
+                            ? cropErr.message
+                            : String(cropErr)
+                        }`
+                      )
                     }
 
                     if (!match) {
@@ -654,7 +715,7 @@ export default function YoloScanner({
                         cropCanvas.width = fw
                         cropCanvas.height = fh
                         cctx.imageSmoothingEnabled = false
-                        cctx.drawImage(video, 0, 0, vw, vh, 0, 0, fw, fh)
+                        cctx.drawImage(videoEl, 0, 0, vw, vh, 0, 0, fw, fh)
                         const blobFull = await canvasToBlob(cropCanvas)
                         const fileFull = new File([blobFull], "fullframe.png", {
                           type: "image/png",
@@ -670,11 +731,13 @@ export default function YoloScanner({
                           .match(SERIAL_PATTERN)
                       } catch (fullErr: unknown) {
                         decoder.clear()
-                        const errText =
-                          fullErr instanceof Error
-                            ? fullErr.message
-                            : String(fullErr)
-                        setDebugMsg(`FB: ${errText}`)
+                        setDebugMsg(
+                          `FB: ${
+                            fullErr instanceof Error
+                              ? fullErr.message
+                              : String(fullErr)
+                          }`
+                        )
                       }
                     }
 
@@ -719,6 +782,7 @@ export default function YoloScanner({
           setCameraError(
             "Tidak dapat mengakses kamera. Periksa izin peramban Anda."
           )
+          setDebugMsg("Error: inisialisasi scanner gagal")
         }
       }
     }
@@ -728,18 +792,11 @@ export default function YoloScanner({
     return () => {
       cancelled = true
       activeLoopRef.current = false
-      streamRef.current?.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
       decodingRef.current = false
       decoderRef.current?.clear()
       decoderRef.current = null
-      if (videoEl) videoEl.srcObject = null
-      if (feedbackTimeoutRef.current) {
-        clearTimeout(feedbackTimeoutRef.current)
-        feedbackTimeoutRef.current = null
-      }
     }
-  }, [isOpen, modelReady, modelError, decodeHostId])
+  }, [isOpen, cameraReady, modelReady, modelError, decodeHostId])
 
   const instruction =
     kategori === "front-load"
@@ -838,10 +895,10 @@ export default function YoloScanner({
               >
                 <video
                   ref={videoRef}
-                  className="absolute inset-0 h-full w-full object-cover"
+                  autoPlay
                   playsInline
                   muted
-                  autoPlay
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
                 <canvas
                   ref={overlayRef}
