@@ -334,7 +334,7 @@ export default function YoloScanner({
   const [modelError, setModelError] = useState<string | null>(null)
   const [cameraReady, setCameraReady] = useState(false)
   const [modelReady, setModelReady] = useState(false)
-  const [modelLoading, setModelLoading] = useState(true)
+  const [modelLoading, setModelLoading] = useState(false)
   const [scannedList, setScannedList] = useState<string[]>([])
   const [scanFeedback, setScanFeedback] = useState<string | null>(null)
   const [showList, setShowList] = useState(false)
@@ -379,6 +379,7 @@ export default function YoloScanner({
     setScanFeedback(null)
     setDebugMsg("")
     setCameraReady(false)
+    setModelLoading(false)
     cooldownUntilRef.current = 0
     lastDecodeAttemptRef.current = 0
     if (feedbackTimeoutRef.current) {
@@ -448,11 +449,18 @@ export default function YoloScanner({
         videoEl.srcObject = stream
         videoEl.setAttribute("playsinline", "true")
         videoEl.muted = true
-        await videoEl.play()
-        if (cancelled) return
+        const markReady = () => {
+          if (cancelled) return
+          setCameraReady(true)
+          setDebugMsg("Kamera siap, memuat model...")
+        }
+        videoEl.addEventListener("loadedmetadata", markReady, { once: true })
+        videoEl.addEventListener("playing", markReady, { once: true })
 
-        setCameraReady(true)
-        setDebugMsg("Kamera siap, memuat model...")
+        await videoEl.play().catch(() => {
+          // Pada beberapa perangkat, play() bisa tertahan; loadedmetadata/playing tetap akan memicu saat siap.
+        })
+        if (cancelled) return
 
         if (loadModelTimeoutRef.current) {
           clearTimeout(loadModelTimeoutRef.current)
@@ -840,7 +848,7 @@ export default function YoloScanner({
   }
 
   const n = scannedList.length
-  const showModelOverlay = modelLoading || !!modelError || !modelReady
+  const showModelOverlay = modelLoading || !!modelError
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
@@ -895,6 +903,7 @@ export default function YoloScanner({
               >
                 <video
                   ref={videoRef}
+                  className="absolute inset-0 h-full w-full"
                   autoPlay
                   playsInline
                   muted
