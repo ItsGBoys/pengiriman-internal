@@ -336,6 +336,7 @@ export default function YoloScanner({
   const [scannedList, setScannedList] = useState<string[]>([])
   const [scanFeedback, setScanFeedback] = useState<string | null>(null)
   const [showList, setShowList] = useState(false)
+  const [debugMsg, setDebugMsg] = useState("")
 
   const badgePopupWrapRef = useRef<HTMLDivElement>(null)
   const popupPanelRef = useRef<HTMLDivElement>(null)
@@ -374,6 +375,7 @@ export default function YoloScanner({
     scannedListRef.current = []
     setShowList(false)
     setScanFeedback(null)
+    setDebugMsg("")
     cooldownUntilRef.current = 0
     lastDecodeAttemptRef.current = 0
     if (feedbackTimeoutRef.current) {
@@ -617,6 +619,10 @@ export default function YoloScanner({
                     cctx.imageSmoothingEnabled = false
                     cctx.drawImage(video, x1, y1, cw, ch, 0, 0, dw, dh)
 
+                    setDebugMsg(
+                      `Crop: ${cropCanvas.width}x${cropCanvas.height}`
+                    )
+
                     let match: RegExpMatchArray | null = null
 
                     try {
@@ -626,11 +632,17 @@ export default function YoloScanner({
                       })
                       const res = await decoder.scanFileV2(file, false)
                       decoder.clear()
+                      setDebugMsg(`OK: ${res.decodedText}`)
                       match = res.decodedText
                         .toUpperCase()
                         .match(SERIAL_PATTERN)
-                    } catch {
+                    } catch (cropErr: unknown) {
                       decoder.clear()
+                      const errText =
+                        cropErr instanceof Error
+                          ? cropErr.message
+                          : String(cropErr)
+                      setDebugMsg(`Err: ${errText}`)
                     }
 
                     if (!match) {
@@ -652,11 +664,17 @@ export default function YoloScanner({
                           false
                         )
                         decoder.clear()
+                        setDebugMsg(`OK: ${resFull.decodedText}`)
                         match = resFull.decodedText
                           .toUpperCase()
                           .match(SERIAL_PATTERN)
-                      } catch {
+                      } catch (fullErr: unknown) {
                         decoder.clear()
+                        const errText =
+                          fullErr instanceof Error
+                            ? fullErr.message
+                            : String(fullErr)
+                        setDebugMsg(`FB: ${errText}`)
                       }
                     }
 
@@ -731,6 +749,7 @@ export default function YoloScanner({
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       setShowList(false)
+      setDebugMsg("")
       streamRef.current?.getTracks().forEach((t) => t.stop())
       streamRef.current = null
       activeLoopRef.current = false
@@ -899,6 +918,18 @@ export default function YoloScanner({
                     </button>
                   </div>
                 ) : null}
+
+                <p
+                  style={{
+                    color: "yellow",
+                    fontSize: "11px",
+                    textAlign: "center",
+                    padding: "4px",
+                    background: "rgba(0,0,0,0.7)",
+                  }}
+                >
+                  {debugMsg}
+                </p>
 
                 <div className="flex justify-end pt-1">
                   <Button
