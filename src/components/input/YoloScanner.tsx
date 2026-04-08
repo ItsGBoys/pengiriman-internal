@@ -278,15 +278,6 @@ function videoRectToDisplay(
   }
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error("toBlob gagal"))),
-      "image/png"
-    )
-  })
-}
-
 /** Minimal DECODE_MIN_EDGE_PX pada kedua sisi kanvas (setara ≥300×300 setelah upscale). */
 function dimensionsForDecodeCanvas(sourceW: number, sourceH: number) {
   const cw = Math.max(1, sourceW)
@@ -547,23 +538,27 @@ export default function YoloScanner({
         const session = sessionRef.current
         if (!session) return
 
-        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import(
-          "html5-qrcode"
+        const { Html5QrcodeSupportedFormats } = await import("html5-qrcode")
+        const { ZXingHtml5QrcodeDecoder } = await import(
+          "html5-qrcode/esm/zxing-html5-qrcode-decoder"
         )
         if (!document.getElementById(decodeHostId)) return
         if (cancelled) return
 
-        const decoder = new Html5Qrcode(decodeHostId, {
-          verbose: false,
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.UPC_A,
-            Html5QrcodeSupportedFormats.QR_CODE,
-          ],
+        const requestedFormats = [
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.QR_CODE,
+        ]
+
+        const zxingDecoder = new ZXingHtml5QrcodeDecoder(requestedFormats, false, {
+          log() {},
+          warn() {},
+          logError() {},
+          logErrors() {},
         })
-        decoderRef.current = decoder
 
         const ort = await import("onnxruntime-web")
         const inputSize = inputSizeRef.current
@@ -713,18 +708,10 @@ export default function YoloScanner({
                     let match: RegExpMatchArray | null = null
 
                     try {
-                      const blob = await canvasToBlob(cropCanvas)
-                      const file = new File([blob], "crop.png", {
-                        type: "image/png",
-                      })
-                      const res = await decoder.scanFileV2(file, false)
-                      decoder.clear()
-                      setDebugMsg(`OK: ${res.decodedText}`)
-                      match = res.decodedText
-                        .toUpperCase()
-                        .match(SERIAL_PATTERN)
+                      const res = await zxingDecoder.decodeAsync(cropCanvas)
+                      setDebugMsg(`OK: ${res.text}`)
+                      match = res.text.toUpperCase().match(SERIAL_PATTERN)
                     } catch (cropErr: unknown) {
-                      decoder.clear()
                       setDebugMsg(
                         `Err: ${
                           cropErr instanceof Error
@@ -744,21 +731,10 @@ export default function YoloScanner({
                         cropCanvas.height = fh
                         cctx.imageSmoothingEnabled = false
                         cctx.drawImage(videoEl, 0, 0, vw, vh, 0, 0, fw, fh)
-                        const blobFull = await canvasToBlob(cropCanvas)
-                        const fileFull = new File([blobFull], "fullframe.png", {
-                          type: "image/png",
-                        })
-                        const resFull = await decoder.scanFileV2(
-                          fileFull,
-                          false
-                        )
-                        decoder.clear()
-                        setDebugMsg(`OK: ${resFull.decodedText}`)
-                        match = resFull.decodedText
-                          .toUpperCase()
-                          .match(SERIAL_PATTERN)
+                        const resFull = await zxingDecoder.decodeAsync(cropCanvas)
+                        setDebugMsg(`OK: ${resFull.text}`)
+                        match = resFull.text.toUpperCase().match(SERIAL_PATTERN)
                       } catch (fullErr: unknown) {
-                        decoder.clear()
                         setDebugMsg(
                           `FB: ${
                             fullErr instanceof Error
