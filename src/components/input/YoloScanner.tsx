@@ -354,6 +354,11 @@ function rotate180InPlace(ctx: CanvasRenderingContext2D) {
   ctx.putImageData(out, 0, 0)
 }
 
+type DetectedBarcode = { rawValue?: string }
+type BarcodeDetectorLike = {
+  detect: (image: CanvasImageSource) => Promise<DetectedBarcode[]>
+}
+
 export default function YoloScanner({
   isOpen,
   onClose,
@@ -369,6 +374,7 @@ export default function YoloScanner({
   const preCanvasRef = useRef<HTMLCanvasElement>(null)
   const cropCanvasRef = useRef<HTMLCanvasElement>(null)
   const workCanvasRef = useRef<HTMLCanvasElement>(null)
+  const barcodeDetectorRef = useRef<BarcodeDetectorLike | null>(null)
 
   const sessionRef = useRef<InferenceSession | null>(null)
   const inputSizeRef = useRef(512)
@@ -392,6 +398,27 @@ export default function YoloScanner({
   const [scanFeedback, setScanFeedback] = useState<string | null>(null)
   const [showList, setShowList] = useState(false)
   const [debugMsg, setDebugMsg] = useState("")
+
+  const decodeWithBarcodeDetector = async (canvas: HTMLCanvasElement) => {
+    try {
+      if (!barcodeDetectorRef.current) {
+        const AnyWin = window as unknown as {
+          BarcodeDetector?: new (opts: {
+            formats: string[]
+          }) => BarcodeDetectorLike
+        }
+        if (!AnyWin.BarcodeDetector) return null
+        barcodeDetectorRef.current = new AnyWin.BarcodeDetector({
+          formats: ["code_128", "ean_13", "ean_8", "upc_a", "qr_code"],
+        })
+      }
+      const res = await barcodeDetectorRef.current.detect(canvas)
+      const text = res?.[0]?.rawValue
+      return text && text.trim() ? text : null
+    } catch {
+      return null
+    }
+  }
 
   const badgePopupWrapRef = useRef<HTMLDivElement>(null)
   const popupPanelRef = useRef<HTMLDivElement>(null)
@@ -771,6 +798,11 @@ export default function YoloScanner({
 
                     try {
                       const tryDecode = async (canvas: HTMLCanvasElement) => {
+                        const nativeText = await decodeWithBarcodeDetector(canvas)
+                        if (nativeText) {
+                          setDebugMsg(`OK: ${nativeText}`)
+                          return nativeText.toUpperCase().match(SERIAL_PATTERN)
+                        }
                         const res = await zxingDecoder.decodeAsync(canvas)
                         setDebugMsg(`OK: ${res.text}`)
                         return res.text.toUpperCase().match(SERIAL_PATTERN)
