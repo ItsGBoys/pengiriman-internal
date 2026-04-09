@@ -293,6 +293,67 @@ function dimensionsForDecodeCanvas(sourceW: number, sourceH: number) {
   }
 }
 
+function toGrayscaleInPlace(ctx: CanvasRenderingContext2D) {
+  const w = ctx.canvas.width
+  const h = ctx.canvas.height
+  const img = ctx.getImageData(0, 0, w, h)
+  const d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    const y = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) | 0
+    d[i] = y
+    d[i + 1] = y
+    d[i + 2] = y
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
+function thresholdInPlace(ctx: CanvasRenderingContext2D, t: number) {
+  const w = ctx.canvas.width
+  const h = ctx.canvas.height
+  const img = ctx.getImageData(0, 0, w, h)
+  const d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    const v = d[i] >= t ? 255 : 0
+    d[i] = v
+    d[i + 1] = v
+    d[i + 2] = v
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
+function invertInPlace(ctx: CanvasRenderingContext2D) {
+  const w = ctx.canvas.width
+  const h = ctx.canvas.height
+  const img = ctx.getImageData(0, 0, w, h)
+  const d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 255 - d[i]
+    d[i + 1] = 255 - d[i + 1]
+    d[i + 2] = 255 - d[i + 2]
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
+function rotate180InPlace(ctx: CanvasRenderingContext2D) {
+  const src = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height)
+  const w = ctx.canvas.width
+  const h = ctx.canvas.height
+  const out = ctx.createImageData(w, h)
+  const a = src.data
+  const b = out.data
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const si = (y * w + x) * 4
+      const di = ((h - 1 - y) * w + (w - 1 - x)) * 4
+      b[di] = a[si]
+      b[di + 1] = a[si + 1]
+      b[di + 2] = a[si + 2]
+      b[di + 3] = a[si + 3]
+    }
+  }
+  ctx.putImageData(out, 0, 0)
+}
+
 export default function YoloScanner({
   isOpen,
   onClose,
@@ -307,6 +368,7 @@ export default function YoloScanner({
   const wrapRef = useRef<HTMLDivElement>(null)
   const preCanvasRef = useRef<HTMLCanvasElement>(null)
   const cropCanvasRef = useRef<HTMLCanvasElement>(null)
+  const workCanvasRef = useRef<HTMLCanvasElement>(null)
 
   const sessionRef = useRef<InferenceSession | null>(null)
   const inputSizeRef = useRef(512)
@@ -708,9 +770,80 @@ export default function YoloScanner({
                     let match: RegExpMatchArray | null = null
 
                     try {
-                      const res = await zxingDecoder.decodeAsync(cropCanvas)
-                      setDebugMsg(`OK: ${res.text}`)
-                      match = res.text.toUpperCase().match(SERIAL_PATTERN)
+                      const tryDecode = async (canvas: HTMLCanvasElement) => {
+                        const res = await zxingDecoder.decodeAsync(canvas)
+                        setDebugMsg(`OK: ${res.text}`)
+                        return res.text.toUpperCase().match(SERIAL_PATTERN)
+                      }
+
+                      // 1) coba raw crop dulu
+                      match = await tryDecode(cropCanvas)
+
+                      // 2) coba fokus ke bagian atas stiker (barcode umumnya di atas teks)
+                      if (!match) {
+                        const topRatio = 0.62
+                        const videoTopH = Math.max(1, Math.round(ch * topRatio))
+                        const { dw: tw, dh: th } = dimensionsForDecodeCanvas(
+                          cw,
+                          videoTopH
+                        )
+                        cropCanvas.width = tw
+                        cropCanvas.height = th
+                        cctx.imageSmoothingEnabled = false
+                        cctx.drawImage(videoEl, x1, y1, cw, videoTopH, 0, 0, tw, th)
+                        setDebugMsg(
+                          `Crop: ${cropCanvas.width}x${cropCanvas.height}`
+                        )
+                        match = await tryDecode(cropCanvas)
+                      }
+
+                      // 3) varian preprocessing (grayscale + threshold / invert / rotasi)
+                      if (!match) {
+                        const work = workCanvasRef.current
+                        const wctx =
+                          work?.getContext("2d", { willReadFrequently: true }) ??
+                          null
+                        if (work && wctx) {
+                          work.width = cropCanvas.width
+                          work.height = cropCanvas.height
+                          wctx.setTransform(1, 0, 0, 1, 0, 0)
+                          wctx.imageSmoothingEnabled = false
+                          wctx.drawImage(cropCanvas, 0, 0)
+                          toGrayscaleInPlace(wctx)
+
+                          // threshold 140
+                          const snap = wctx.getImageData(
+                            0,
+                            0,
+                            work.width,
+                            work.height
+                          )
+                          thresholdInPlace(wctx, 140)
+                          match = await tryDecode(work)
+
+                          if (!match) {
+                            invertInPlace(wctx)
+                            match = await tryDecode(work)
+                          }
+
+                          if (!match) {
+                            wctx.putImageData(snap, 0, 0)
+                            thresholdInPlace(wctx, 180)
+                            match = await tryDecode(work)
+                          }
+
+                          if (!match) {
+                            invertInPlace(wctx)
+                            match = await tryDecode(work)
+                          }
+
+                          if (!match) {
+                            // rotasi 180° dan coba lagi
+                            rotate180InPlace(wctx)
+                            match = await tryDecode(work)
+                          }
+                        }
+                      }
                     } catch (cropErr: unknown) {
                       setDebugMsg(
                         `Err: ${
@@ -872,6 +1005,7 @@ export default function YoloScanner({
 
         <canvas ref={preCanvasRef} className="hidden" aria-hidden />
         <canvas ref={cropCanvasRef} className="hidden" aria-hidden />
+        <canvas ref={workCanvasRef} className="hidden" aria-hidden />
 
         <div className="relative flex min-h-0 flex-1 flex-col bg-black">
           <Button
