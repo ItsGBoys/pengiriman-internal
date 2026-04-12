@@ -23,6 +23,37 @@ const DECODE_INTERVAL_MS = 280
 const NMS_IOU = 0.45
 const CROP_PADDING_FRAC = 0.2
 const DECODE_MIN_EDGE_PX = 300
+/** Cegah detect/decode menggantung di Chrome Android (UI mentok di "Crop: …"). */
+const DECODE_OP_TIMEOUT_MS = 3000
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let id: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    id = setTimeout(() => reject(new Error("timeout")), ms)
+  })
+  const tracked = promise.finally(() => {
+    if (id !== undefined) clearTimeout(id)
+  })
+  return Promise.race([tracked, timeout])
+}
+
+type ZxingDecoderLike = {
+  decodeAsync: (canvas: HTMLCanvasElement) => Promise<{ text: string }>
+}
+
+async function zxingDecodeSafe(
+  zxingDecoder: ZxingDecoderLike,
+  canvas: HTMLCanvasElement
+): Promise<{ text: string } | null> {
+  try {
+    return await withTimeout(
+      zxingDecoder.decodeAsync(canvas),
+      DECODE_OP_TIMEOUT_MS
+    )
+  } catch {
+    return null
+  }
+}
 
 export interface YoloScannerProps {
   isOpen: boolean
@@ -412,7 +443,10 @@ export default function YoloScanner({
           formats: ["code_128", "ean_13", "ean_8", "upc_a", "qr_code"],
         })
       }
-      const res = await barcodeDetectorRef.current.detect(canvas)
+      const res = await withTimeout(
+        barcodeDetectorRef.current.detect(canvas),
+        DECODE_OP_TIMEOUT_MS
+      )
       const text = res?.[0]?.rawValue
       return text && text.trim() ? text : null
     } catch {
@@ -803,7 +837,8 @@ export default function YoloScanner({
                           setDebugMsg(`OK: ${nativeText}`)
                           return nativeText.toUpperCase().match(SERIAL_PATTERN)
                         }
-                        const res = await zxingDecoder.decodeAsync(canvas)
+                        const res = await zxingDecodeSafe(zxingDecoder, canvas)
+                        if (!res) return null
                         setDebugMsg(`OK: ${res.text}`)
                         return res.text.toUpperCase().match(SERIAL_PATTERN)
                       }
@@ -896,9 +931,16 @@ export default function YoloScanner({
                         cropCanvas.height = fh
                         cctx.imageSmoothingEnabled = false
                         cctx.drawImage(videoEl, 0, 0, vw, vh, 0, 0, fw, fh)
-                        const resFull = await zxingDecoder.decodeAsync(cropCanvas)
-                        setDebugMsg(`OK: ${resFull.text}`)
-                        match = resFull.text.toUpperCase().match(SERIAL_PATTERN)
+                        const resFull = await zxingDecodeSafe(
+                          zxingDecoder,
+                          cropCanvas
+                        )
+                        if (resFull) {
+                          setDebugMsg(`OK: ${resFull.text}`)
+                          match = resFull.text
+                            .toUpperCase()
+                            .match(SERIAL_PATTERN)
+                        }
                       } catch (fullErr: unknown) {
                         setDebugMsg(
                           `FB: ${
@@ -908,6 +950,22 @@ export default function YoloScanner({
                           }`
                         )
                       }
+                    }
+
+                    if (!match && !cancelled) {
+                      setDebugMsg((prev) => {
+                        if (
+                          prev.startsWith("FB:") ||
+                          prev.startsWith("Err:") ||
+                          prev.startsWith("OK:")
+                        ) {
+                          return prev
+                        }
+                        if (prev.startsWith("Crop:")) {
+                          return "Stiker terdeteksi; barcode belum terbaca — coba lampu/jarak"
+                        }
+                        return prev
+                      })
                     }
 
                     if (match && !cancelled) {
