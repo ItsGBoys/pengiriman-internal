@@ -20,6 +20,7 @@ import {
 } from "recharts"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Card,
   CardContent,
@@ -78,6 +79,8 @@ function threeMonthWindowStart(year: number, month: number) {
 export default function RekapPage() {
   const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState(new Date().getMonth() + 1)
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
 
   const [rows, setRows] = useState<PengirimanAggRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -140,6 +143,12 @@ export default function RekapPage() {
     () => filterByRange(rows, monthStart, monthEnd),
     [rows, monthStart, monthEnd]
   )
+  const monthRowsFiltered = useMemo(() => {
+    if (!dateFrom && !dateTo) return monthRows
+    const from = dateFrom || monthStart
+    const to = dateTo || monthEnd
+    return filterByRange(monthRows, from, to)
+  }, [monthRows, dateFrom, dateTo, monthStart, monthEnd])
 
   const windowRows = useMemo(
     () => filterByRange(rows, windowFrom, windowTo),
@@ -149,10 +158,10 @@ export default function RekapPage() {
   const truncated = rows.length >= FETCH_LIMIT
 
   const summary = useMemo(() => {
-    const totalPengiriman = monthRows.length
-    const totalUnit = monthRows.reduce((a, r) => a + sumUnits(r), 0)
+    const totalPengiriman = monthRowsFiltered.length
+    const totalUnit = monthRowsFiltered.reduce((a, r) => a + sumUnits(r), 0)
     const tokoSet = new Set(
-      monthRows
+      monthRowsFiltered
         .map((r) => r.toko_tujuan?.trim())
         .filter((t): t is string => Boolean(t))
     )
@@ -164,21 +173,21 @@ export default function RekapPage() {
       totalToko: tokoSet.size,
       avg,
     }
-  }, [monthRows])
+  }, [monthRowsFiltered])
 
   const barData = useMemo(() => {
     const last = lastDayOfMonth(year, month).getDate()
     const out: { label: string; tanggal: string; unit: number }[] = []
     for (let d = 1; d <= last; d++) {
       const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`
-      const trips = monthRows.filter(
+      const trips = monthRowsFiltered.filter(
         (r) => normalizeDateKey(r.tanggal_pengiriman) === key
       )
       const unit = trips.reduce((a, r) => a + sumUnits(r), 0)
       out.push({ label: String(d), tanggal: key, unit })
     }
     return out
-  }, [monthRows, year, month])
+  }, [monthRowsFiltered, year, month])
 
   const lineData = useMemo(() => {
     const map = new Map<string, number>()
@@ -201,21 +210,21 @@ export default function RekapPage() {
 
   const pieData = useMemo(() => {
     const m = new Map<string, number>()
-    for (const r of monthRows) {
+    for (const r of monthRowsFiltered) {
       const t = r.toko_tujuan?.trim() || "(Tanpa nama)"
       m.set(t, (m.get(t) ?? 0) + 1)
     }
     const sorted = Array.from(m.entries()).sort((a, b) => b[1] - a[1])
     const top = sorted.slice(0, 5)
     return top.map(([name, value]) => ({ name, value }))
-  }, [monthRows])
+  }, [monthRowsFiltered])
 
   const rekapHarian = useMemo(() => {
     const map = new Map<
       string,
       { trips: number; units: number; toko: Set<string> }
     >()
-    for (const r of monthRows) {
+    for (const r of monthRowsFiltered) {
       const k = normalizeDateKey(r.tanggal_pengiriman)
       if (!map.has(k)) {
         map.set(k, { trips: 0, units: 0, toko: new Set() })
@@ -234,7 +243,7 @@ export default function RekapPage() {
         totalUnit: v.units,
         tokoDilayani: v.toko.size,
       }))
-  }, [monthRows])
+  }, [monthRowsFiltered])
 
   const rekapMingguan = useMemo(() => {
     const map = new Map<
@@ -271,17 +280,17 @@ export default function RekapPage() {
   function exportExcel() {
     const wb = XLSX.utils.book_new()
     const groups = new Map<string, PengirimanAggRow[]>()
-    for (const row of monthRows) {
+    for (const row of monthRowsFiltered) {
       const dateKey = normalizeDateKey(row.tanggal_pengiriman)
       const existing = groups.get(dateKey) ?? []
       existing.push(row)
       groups.set(dateKey, existing)
     }
     const sortedDates = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b))
+    const hasExplicitRange = Boolean(dateFrom || dateTo)
 
-    for (const dateKey of sortedDates) {
-      const rowsForDate = groups.get(dateKey) ?? []
-      const sheetRows: Array<Record<string, string | number>> = []
+    const buildRowsForDate = (rowsForDate: PengirimanAggRow[], dateKey: string) => {
+      const sheetRows: Array<Record<string, string>> = []
       for (const p of rowsForDate) {
         const details = p.detail_pengiriman ?? []
         if (details.length === 0) {
@@ -290,13 +299,10 @@ export default function RekapPage() {
             "ID Pengiriman": p.id,
             "Toko Tujuan": p.toko_tujuan ?? "",
             "Nomor DO": p.nomor_do ?? "",
-            "Nomor Kendaraan": p.nomor_kendaraan ?? "",
             "Supir/Vendor": p.nama_supir_vendor ?? "",
-            Status: p.status ?? "",
+            "Nomor Kendaraan": p.nomor_kendaraan ?? "",
             "Tipe Barang": "",
-            "Jumlah Unit Detail": 0,
             "Nomor Seri": "",
-            "Total Unit Pengiriman": sumUnits(p),
           })
           continue
         }
@@ -308,13 +314,10 @@ export default function RekapPage() {
               "ID Pengiriman": p.id,
               "Toko Tujuan": p.toko_tujuan ?? "",
               "Nomor DO": p.nomor_do ?? "",
-              "Nomor Kendaraan": p.nomor_kendaraan ?? "",
               "Supir/Vendor": p.nama_supir_vendor ?? "",
-              Status: p.status ?? "",
+              "Nomor Kendaraan": p.nomor_kendaraan ?? "",
               "Tipe Barang": d.tipe_mesin ?? "",
-              "Jumlah Unit Detail": Number(d.jumlah) || 0,
               "Nomor Seri": "",
-              "Total Unit Pengiriman": sumUnits(p),
             })
             continue
           }
@@ -324,20 +327,33 @@ export default function RekapPage() {
               "ID Pengiriman": p.id,
               "Toko Tujuan": p.toko_tujuan ?? "",
               "Nomor DO": p.nomor_do ?? "",
-              "Nomor Kendaraan": p.nomor_kendaraan ?? "",
               "Supir/Vendor": p.nama_supir_vendor ?? "",
-              Status: p.status ?? "",
+              "Nomor Kendaraan": p.nomor_kendaraan ?? "",
               "Tipe Barang": d.tipe_mesin ?? "",
-              "Jumlah Unit Detail": Number(d.jumlah) || 0,
               "Nomor Seri": ns.nomor_seri ?? "",
-              "Total Unit Pengiriman": sumUnits(p),
             })
           }
         }
       }
-      const ws = XLSX.utils.json_to_sheet(sheetRows)
-      const sheetName = dateKey.replace(/-/g, "")
-      XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31))
+      return sheetRows
+    }
+
+    if (hasExplicitRange) {
+      const flatRows: Array<Record<string, string>> = []
+      for (const dateKey of sortedDates) {
+        const rowsForDate = groups.get(dateKey) ?? []
+        flatRows.push(...buildRowsForDate(rowsForDate, dateKey))
+      }
+      const ws = XLSX.utils.json_to_sheet(flatRows)
+      XLSX.utils.book_append_sheet(wb, ws, "REKAP")
+    } else {
+      for (const dateKey of sortedDates) {
+        const rowsForDate = groups.get(dateKey) ?? []
+        const sheetRows = buildRowsForDate(rowsForDate, dateKey)
+        const ws = XLSX.utils.json_to_sheet(sheetRows)
+        const sheetName = dateKey.replace(/-/g, "")
+        XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31))
+      }
     }
     XLSX.writeFile(
       wb,
@@ -417,7 +433,7 @@ export default function RekapPage() {
     }
 
     drawRow(colDefs.map((c) => c.title), true)
-    for (const p of monthRows) {
+    for (const p of monthRowsFiltered) {
       const row = [
         normalizeDateKey(p.tanggal_pengiriman),
         p.toko_tujuan ?? "",
@@ -483,6 +499,26 @@ export default function RekapPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="date-from" className="text-xs">Dari tanggal</Label>
+              <Input
+                id="date-from"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="h-9 w-[160px]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="date-to" className="text-xs">Sampai tanggal</Label>
+              <Input
+                id="date-to"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="h-9 w-[160px]"
+              />
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -491,7 +527,7 @@ export default function RekapPage() {
               size="sm"
               className="gap-1.5"
               onClick={exportExcel}
-              disabled={loading || monthRows.length === 0}
+              disabled={loading || monthRowsFiltered.length === 0}
             >
               <FileSpreadsheet className="size-4" aria-hidden />
               Export Excel
@@ -502,7 +538,7 @@ export default function RekapPage() {
               size="sm"
               className="gap-1.5"
               onClick={exportPdf}
-              disabled={loading}
+              disabled={loading || monthRowsFiltered.length === 0}
             >
               <Download className="size-4" aria-hidden />
               Export PDF
