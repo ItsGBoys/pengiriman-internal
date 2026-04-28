@@ -34,7 +34,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 
 const YoloScanner = dynamic(
-  () => import("@/components/input/YoloScanner"),
+  () => import("@/components/input/BarcodeScanner"),
   { ssr: false }
 )
 
@@ -75,6 +75,7 @@ type BarisTipe = {
   tipe: string
   serials: string[]
   draftSerial: string
+  maxSerial: string
 }
 
 function newBaris(): BarisTipe {
@@ -83,6 +84,7 @@ function newBaris(): BarisTipe {
     tipe: "",
     serials: [],
     draftSerial: "",
+    maxSerial: "",
   }
 }
 
@@ -102,15 +104,36 @@ function formatRpcError(message: string) {
   return message
 }
 
+function normalizeUpper(value: string) {
+  return value.trim().toUpperCase()
+}
+
+const BACKUP_KEY = "pending-pengiriman-submit-v1"
+
+type PendingSubmitPayload = {
+  toko_tujuan: string
+  nomor_kendaraan: string
+  nama_supir_vendor: string
+  tanggal_pengiriman: string
+  catatan: string | null
+  details: Array<{
+    tipe: string
+    serials: string[]
+  }>
+}
+
 export default function InputPengirimanPage() {
   const [tokoTujuan, setTokoTujuan] = useState("")
   const [nomorKendaraan, setNomorKendaraan] = useState("")
+  const [namaSupirVendor, setNamaSupirVendor] = useState("")
   const [catatan, setCatatan] = useState("")
   const [baris, setBaris] = useState<BarisTipe[]>(() => [newBaris()])
   const [formError, setFormError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [backupPending, setBackupPending] = useState(false)
+  const [retryingBackup, setRetryingBackup] = useState(false)
   const [scannerState, setScannerState] = useState<{
     open: boolean
     lineId: string
@@ -134,10 +157,38 @@ export default function InputPengirimanPage() {
   const resetForm = useCallback(() => {
     setTokoTujuan("")
     setNomorKendaraan("")
+    setNamaSupirVendor("")
     setCatatan("")
     setBaris([newBaris()])
     setFormError(null)
   }, [])
+
+  const saveBackupToLocal = useCallback((payload: PendingSubmitPayload) => {
+    if (typeof window === "undefined") return
+    localStorage.setItem(BACKUP_KEY, JSON.stringify(payload))
+    setBackupPending(true)
+  }, [])
+
+  const clearBackupLocal = useCallback(() => {
+    if (typeof window === "undefined") return
+    localStorage.removeItem(BACKUP_KEY)
+    setBackupPending(false)
+  }, [])
+
+  const readBackupLocal = useCallback((): PendingSubmitPayload | null => {
+    if (typeof window === "undefined") return null
+    const raw = localStorage.getItem(BACKUP_KEY)
+    if (!raw) return null
+    try {
+      return JSON.parse(raw) as PendingSubmitPayload
+    } catch {
+      return null
+    }
+  }, [])
+
+  useEffect(() => {
+    setBackupPending(Boolean(readBackupLocal()))
+  }, [readBackupLocal])
 
   function validate(): string | null {
     if (!tokoTujuan.trim()) {
@@ -145,6 +196,9 @@ export default function InputPengirimanPage() {
     }
     if (!nomorKendaraan.trim()) {
       return "Nomor kendaraan wajib diisi."
+    }
+    if (!namaSupirVendor.trim()) {
+      return "Nama supir/vendor wajib diisi."
     }
     if (baris.length === 0) {
       return "Minimal ada satu tipe barang."
@@ -156,6 +210,15 @@ export default function InputPengirimanPage() {
       }
       if (b.serials.length < 1) {
         return `Tipe "${b.tipe}": minimal tambahkan satu nomor seri.`
+      }
+      if (b.maxSerial.trim()) {
+        const parsed = Number(b.maxSerial)
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          return `Tipe "${b.tipe}": maksimal nomor seri harus bilangan bulat minimal 1.`
+        }
+        if (b.serials.length > parsed) {
+          return `Tipe "${b.tipe}": jumlah serial (${b.serials.length}) melebihi batas maksimal (${parsed}).`
+        }
       }
     }
     const seen = new Map<string, string>()
@@ -198,31 +261,70 @@ export default function InputPengirimanPage() {
     setFormError(null)
 
     const payload = baris.map((b) => ({
-      tipe: b.tipe.trim(),
-      serials: b.serials.map((s) => s.trim()),
+      tipe: normalizeUpper(b.tipe),
+      serials: b.serials.map((s) => normalizeUpper(s)),
     }))
+    const requestPayload: PendingSubmitPayload = {
+      toko_tujuan: normalizeUpper(tokoTujuan),
+      nomor_kendaraan: normalizeUpper(nomorKendaraan),
+      nama_supir_vendor: normalizeUpper(namaSupirVendor),
+      tanggal_pengiriman: getLocalDateString(new Date()),
+      catatan: catatan.trim() ? normalizeUpper(catatan) : null,
+      details: payload,
+    }
 
     const supabase = createClient()
     const { data, error } = await supabase.rpc("submit_pengiriman_staff", {
-      p_toko_tujuan: tokoTujuan.trim(),
-      p_nomor_kendaraan: nomorKendaraan.trim(),
-      p_tanggal_pengiriman: getLocalDateString(new Date()),
-      p_catatan: catatan.trim() || null,
-      p_details: payload,
+      p_toko_tujuan: requestPayload.toko_tujuan,
+      p_nomor_kendaraan: requestPayload.nomor_kendaraan,
+      p_nama_supir_vendor: requestPayload.nama_supir_vendor,
+      p_tanggal_pengiriman: requestPayload.tanggal_pengiriman,
+      p_catatan: requestPayload.catatan,
+      p_details: requestPayload.details,
     })
 
     setSaving(false)
 
     if (error) {
+      saveBackupToLocal(requestPayload)
       setFormError(formatRpcError(error.message))
       return
     }
 
+    clearBackupLocal()
     setConfirmOpen(false)
     setSuccessMsg(
       `Pengiriman berhasil disimpan (ID: ${data ?? "—"}). Form telah dikosongkan untuk entri berikutnya.`
     )
     resetForm()
+  }
+
+  async function retryBackupSubmission() {
+    const backup = readBackupLocal()
+    if (!backup) {
+      setBackupPending(false)
+      return
+    }
+    setRetryingBackup(true)
+    setFormError(null)
+    const supabase = createClient()
+    const { data, error } = await supabase.rpc("submit_pengiriman_staff", {
+      p_toko_tujuan: backup.toko_tujuan,
+      p_nomor_kendaraan: backup.nomor_kendaraan,
+      p_nama_supir_vendor: backup.nama_supir_vendor,
+      p_tanggal_pengiriman: backup.tanggal_pengiriman,
+      p_catatan: backup.catatan,
+      p_details: backup.details,
+    })
+    setRetryingBackup(false)
+    if (error) {
+      setFormError(
+        `Retry gagal: ${formatRpcError(error.message)}. Backup tetap tersimpan dan bisa dicoba lagi.`
+      )
+      return
+    }
+    clearBackupLocal()
+    setSuccessMsg(`Backup pengiriman berhasil dikirim ulang (ID: ${data ?? "—"}).`)
   }
 
   function updateBaris(id: string, patch: Partial<BarisTipe>) {
@@ -248,9 +350,25 @@ export default function InputPengirimanPage() {
       setFormError("Masukkan nomor seri sebelum menambah.")
       return
     }
+    if (b.maxSerial.trim()) {
+      const max = Number(b.maxSerial)
+      if (Number.isInteger(max) && max > 0 && b.serials.length >= max) {
+        setFormError(
+          `Tipe "${b.tipe || "tanpa tipe"}" sudah mencapai batas maksimal ${max} serial.`
+        )
+        return
+      }
+    }
+    const duplicate = barisRef.current.some((row) =>
+      row.serials.some((serial) => serial.trim().toLowerCase() === sn.toLowerCase())
+    )
+    if (duplicate) {
+      setFormError(`Nomor seri "${sn}" sudah terdaftar di pengiriman ini.`)
+      return
+    }
     setFormError(null)
     updateBaris(b.id, {
-      serials: [...b.serials, sn],
+      serials: [...b.serials, normalizeUpper(sn)],
       draftSerial: "",
     })
   }
@@ -280,10 +398,23 @@ export default function InputPengirimanPage() {
 
     const toAdd: string[] = []
     const skipped: string[] = []
+    const maxLimited: string[] = []
+    const selectedRow = prev.find((b) => b.id === lineId)
+    const max = selectedRow?.maxSerial.trim()
+      ? Number(selectedRow.maxSerial)
+      : null
+    let remaining =
+      max && Number.isInteger(max) && max > 0
+        ? Math.max(0, max - (selectedRow?.serials.length ?? 0))
+        : Number.POSITIVE_INFINITY
 
     for (const raw of serialNumbers) {
-      const sn = raw.trim()
+      const sn = normalizeUpper(raw)
       if (!sn) continue
+      if (remaining <= 0) {
+        maxLimited.push(sn)
+        continue
+      }
       const key = sn.toLowerCase()
       if (seen.has(key)) {
         skipped.push(sn)
@@ -292,6 +423,7 @@ export default function InputPengirimanPage() {
       const lineTipe = prev.find((b) => b.id === lineId)?.tipe ?? ""
       seen.set(key, lineTipe)
       toAdd.push(sn)
+      remaining -= 1
     }
 
     if (toAdd.length > 0) {
@@ -322,6 +454,12 @@ export default function InputPengirimanPage() {
     } else if (toAdd.length > 0) {
       setFormError(null)
     }
+    if (maxLimited.length > 0) {
+      const limit = max && Number.isInteger(max) && max > 0 ? max : 0
+      setFormError(
+        `Batas maksimal serial untuk tipe ini (${limit}) sudah tercapai. ${maxLimited.length} serial tidak ditambahkan.`
+      )
+    }
   }
 
   return (
@@ -338,6 +476,23 @@ export default function InputPengirimanPage() {
         <Card className="border-destructive/40 bg-destructive/5">
           <CardContent className="text-destructive pt-6 text-sm" role="alert">
             {formError}
+          </CardContent>
+        </Card>
+      ) : null}
+      {backupPending ? (
+        <Card className="border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40">
+          <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
+            Pengiriman sebelumnya gagal terkirim ke database dan sudah dibackup di perangkat ini.
+            <div className="mt-3">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void retryBackupSubmission()}
+                disabled={retryingBackup}
+              >
+                {retryingBackup ? "Mengirim ulang…" : "Kirim ulang backup"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -370,6 +525,17 @@ export default function InputPengirimanPage() {
                 value={nomorKendaraan}
                 onChange={(e) => setNomorKendaraan(e.target.value)}
                 placeholder="B 1234 XYZ"
+                className="h-10"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="supir-vendor">Nama supir / vendor</Label>
+              <Input
+                id="supir-vendor"
+                value={namaSupirVendor}
+                onChange={(e) => setNamaSupirVendor(e.target.value)}
+                placeholder="Nama supir atau vendor"
                 className="h-10"
                 autoComplete="off"
               />
@@ -441,6 +607,23 @@ export default function InputPengirimanPage() {
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs">
+                        Maksimal nomor seri untuk tipe ini (opsional)
+                      </Label>
+                      <Input
+                        value={b.maxSerial}
+                        onChange={(e) =>
+                          updateBaris(b.id, {
+                            maxSerial: e.target.value.replace(/[^\d]/g, ""),
+                          })
+                        }
+                        placeholder="Contoh: 10"
+                        className="h-10"
+                        inputMode="numeric"
+                      />
                     </div>
 
                     <div className="space-y-2">
@@ -573,6 +756,7 @@ export default function InputPengirimanPage() {
             <ul className="text-foreground mt-3 list-inside list-disc text-left text-sm">
               <li>Toko: {tokoTujuan.trim() || "—"}</li>
               <li>Kendaraan: {nomorKendaraan.trim() || "—"}</li>
+              <li>Supir/Vendor: {namaSupirVendor.trim() || "—"}</li>
               <li>
                 {baris.length} tipe, {totalSerial} nomor seri
               </li>

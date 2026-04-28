@@ -76,9 +76,8 @@ function threeMonthWindowStart(year: number, month: number) {
 }
 
 export default function RekapPage() {
-  const now = new Date()
-  const [year, setYear] = useState(now.getFullYear())
-  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear] = useState(new Date().getFullYear())
+  const [month, setMonth] = useState(new Date().getMonth() + 1)
 
   const [rows, setRows] = useState<PengirimanAggRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -107,6 +106,8 @@ export default function RekapPage() {
         tanggal_pengiriman,
         toko_tujuan,
         nomor_kendaraan,
+        nama_supir_vendor,
+        catatan,
         status,
         detail_pengiriman (
           id,
@@ -262,45 +263,61 @@ export default function RekapPage() {
   }, [monthRows])
 
   const yearOptions = useMemo(() => {
-    const y = now.getFullYear()
+    const y = new Date().getFullYear()
     return [y - 2, y - 1, y, y + 1]
-  }, [now])
+  }, [])
 
   function exportExcel() {
-    const header = [
-      "Tanggal",
-      "Toko tujuan",
-      "Nomor kendaraan",
-      "Tipe barang",
-      "Nomor seri",
-    ]
-    const body: string[][] = []
-    for (const p of monthRows) {
-      const tgl = normalizeDateKey(p.tanggal_pengiriman)
-      const toko = p.toko_tujuan ?? ""
-      const kendaraan = p.nomor_kendaraan ?? ""
-      const details = p.detail_pengiriman ?? []
-      for (const d of details) {
-        const tipe = d.tipe_mesin ?? ""
-        const serials = d.nomor_seri ?? []
-        if (serials.length === 0) {
-          body.push([tgl, toko, kendaraan, tipe, ""])
-        } else {
-          for (const ns of serials) {
-            body.push([tgl, toko, kendaraan, tipe, ns.nomor_seri ?? ""])
-          }
+    const wb = XLSX.utils.book_new()
+    const groups = new Map<string, PengirimanAggRow[]>()
+    for (const row of monthRows) {
+      const dateKey = normalizeDateKey(row.tanggal_pengiriman)
+      const existing = groups.get(dateKey) ?? []
+      existing.push(row)
+      groups.set(dateKey, existing)
+    }
+    const sortedDates = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b))
+
+    for (const dateKey of sortedDates) {
+      const rowsForDate = groups.get(dateKey) ?? []
+      const sheetRows: Array<Record<string, string | number>> = []
+      for (const p of rowsForDate) {
+        const details = p.detail_pengiriman ?? []
+        if (details.length === 0) {
+          sheetRows.push({
+            Tanggal: dateKey,
+            "ID Pengiriman": p.id,
+            "Toko Tujuan": p.toko_tujuan ?? "",
+            "Nomor Kendaraan": p.nomor_kendaraan ?? "",
+            "Supir/Vendor": p.nama_supir_vendor ?? "",
+            Status: p.status ?? "",
+            "Tipe Barang": "",
+            "Jumlah Unit Detail": 0,
+            "Total Unit Pengiriman": sumUnits(p),
+          })
+          continue
+        }
+        for (const d of details) {
+          sheetRows.push({
+            Tanggal: dateKey,
+            "ID Pengiriman": p.id,
+            "Toko Tujuan": p.toko_tujuan ?? "",
+            "Nomor Kendaraan": p.nomor_kendaraan ?? "",
+            "Supir/Vendor": p.nama_supir_vendor ?? "",
+            Status: p.status ?? "",
+            "Tipe Barang": d.tipe_mesin ?? "",
+            "Jumlah Unit Detail": Number(d.jumlah) || 0,
+            "Total Unit Pengiriman": sumUnits(p),
+          })
         }
       }
-      if (details.length === 0) {
-        body.push([tgl, toko, kendaraan, "", ""])
-      }
+      const ws = XLSX.utils.json_to_sheet(sheetRows)
+      const sheetName = dateKey.replace(/-/g, "")
+      XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31))
     }
-    const ws = XLSX.utils.aoa_to_sheet([header, ...body])
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Rekap")
     XLSX.writeFile(
       wb,
-      `rekap-detail-${year}-${String(month).padStart(2, "0")}.xlsx`
+      `rekap-pengiriman-${year}-${String(month).padStart(2, "0")}.xlsx`
     )
   }
 
@@ -309,7 +326,6 @@ export default function RekapPage() {
     let yPos = 16
     const lineH = 7
     const margin = 14
-    const pageW = doc.internal.pageSize.getWidth()
 
     doc.setFontSize(16)
     doc.text("Rekap pengiriman", margin, yPos)
@@ -337,25 +353,56 @@ export default function RekapPage() {
 
     yPos += 4
     doc.setFontSize(11)
-    doc.text("Ringkasan per hari (bulan ini)", margin, yPos)
+    doc.text("Data pengiriman (tanpa nomor seri)", margin, yPos)
     yPos += lineH + 2
 
-    doc.setFontSize(9)
-    for (const row of rekapHarian) {
-      const tglFmt = new Date(`${row.tanggal}T12:00:00`).toLocaleDateString(
-        "id-ID",
-        { day: "numeric", month: "short", year: "numeric" }
-      )
-      const txt = `${tglFmt} — trip: ${row.jumlahTrip}, unit: ${row.totalUnit}, toko: ${row.tokoDilayani}`
-      const wrapped = doc.splitTextToSize(txt, pageW - margin * 2)
-      for (const wline of wrapped) {
-        if (yPos > 280) {
-          doc.addPage()
-          yPos = 16
-        }
-        doc.text(wline, margin, yPos)
-        yPos += 5
+    const colDefs = [
+      { title: "Tanggal", width: 22 },
+      { title: "Toko", width: 32 },
+      { title: "Kendaraan", width: 24 },
+      { title: "Supir/Vendor", width: 32 },
+      { title: "Unit", width: 10 },
+      { title: "Status", width: 16 },
+      { title: "Catatan", width: 36 },
+    ]
+    const tableW = colDefs.reduce((acc, c) => acc + c.width, 0)
+    const drawRow = (values: string[], isHeader = false) => {
+      const rowHeight = 7
+      if (yPos + rowHeight > 285) {
+        doc.addPage()
+        yPos = 16
       }
+      let x = margin
+      if (isHeader) {
+        doc.setFillColor(245, 245, 245)
+        doc.rect(x, yPos - 5, tableW, rowHeight, "F")
+        doc.setFont("helvetica", "bold")
+      } else {
+        doc.setFont("helvetica", "normal")
+      }
+      doc.setFontSize(8)
+      for (let i = 0; i < colDefs.length; i++) {
+        const col = colDefs[i]
+        doc.rect(x, yPos - 5, col.width, rowHeight)
+        const txt = (values[i] ?? "").slice(0, 24)
+        doc.text(txt, x + 1.5, yPos - 1)
+        x += col.width
+      }
+      yPos += rowHeight
+    }
+
+    drawRow(colDefs.map((c) => c.title), true)
+    for (const p of monthRows) {
+      const row = [
+        normalizeDateKey(p.tanggal_pengiriman),
+        p.toko_tujuan ?? "",
+        p.nomor_kendaraan ?? "",
+        p.nama_supir_vendor ?? "",
+        String(sumUnits(p)),
+        p.status ?? "",
+        p.catatan ?? "",
+      ]
+      drawRow(row)
     }
 
     doc.save(`rekap-ringkasan-${year}-${String(month).padStart(2, "0")}.pdf`)

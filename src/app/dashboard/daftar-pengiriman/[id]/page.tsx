@@ -41,6 +41,7 @@ type PengirimanDetail = {
   tanggal_pengiriman: string
   toko_tujuan: string | null
   nomor_kendaraan: string | null
+  nama_supir_vendor: string | null
   status: string | null
   catatan: string | null
   detail_pengiriman: DetailBarangRow[] | null
@@ -72,6 +73,7 @@ export default function DetailPengirimanPage() {
         tanggal_pengiriman,
         toko_tujuan,
         nomor_kendaraan,
+        nama_supir_vendor,
         status,
         catatan,
         detail_pengiriman (
@@ -216,6 +218,12 @@ export default function DetailPengirimanPage() {
               Nomor kendaraan
             </p>
             <p className="mt-0.5 font-medium">{data.nomor_kendaraan ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs font-medium uppercase">
+              Supir / Vendor
+            </p>
+            <p className="mt-0.5 font-medium">{data.nama_supir_vendor ?? "—"}</p>
           </div>
           <div className="sm:col-span-2">
             <p className="text-muted-foreground text-xs font-medium uppercase">

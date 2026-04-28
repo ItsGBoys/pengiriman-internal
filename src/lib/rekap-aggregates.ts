@@ -12,6 +12,8 @@ export type PengirimanAggRow = {
   tanggal_pengiriman: string
   toko_tujuan: string | null
   nomor_kendaraan: string | null
+  nama_supir_vendor: string | null
+  catatan: string | null
   status: string | null
   detail_pengiriman: DetailAggRow[] | null
 }

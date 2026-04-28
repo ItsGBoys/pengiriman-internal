@@ -86,6 +86,7 @@ export default function DaftarPengirimanPage() {
         tanggal_pengiriman,
         toko_tujuan,
         nomor_kendaraan,
+        nama_supir_vendor,
         status,
         detail_pengiriman ( jumlah )
       `
@@ -98,7 +99,7 @@ export default function DaftarPengirimanPage() {
       const safe = escapeIlikePattern(searchDebounced)
       const pattern = `%${safe}%`
       q = q.or(
-        `toko_tujuan.ilike.${pattern},nomor_kendaraan.ilike.${pattern}`
+        `toko_tujuan.ilike.${pattern},nomor_kendaraan.ilike.${pattern},nama_supir_vendor.ilike.${pattern}`
       )
     }
 
@@ -182,7 +183,7 @@ export default function DaftarPengirimanPage() {
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2 sm:col-span-2 lg:col-span-2">
-              <Label htmlFor="search">Cari toko atau nomor kendaraan</Label>
+              <Label htmlFor="search">Cari toko, kendaraan, atau supir/vendor</Label>
               <Input
                 id="search"
                 value={searchInput}
@@ -257,6 +258,7 @@ export default function DaftarPengirimanPage() {
                 <TableHead>Tanggal</TableHead>
                 <TableHead className="min-w-[120px]">Toko tujuan</TableHead>
                 <TableHead>Nomor kendaraan</TableHead>
+                <TableHead>Supir/Vendor</TableHead>
                 <TableHead className="text-right">Total unit</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Aksi</TableHead>
@@ -266,7 +268,7 @@ export default function DaftarPengirimanPage() {
               {loading ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-muted-foreground h-24 text-center"
                   >
                     Memuat…
@@ -275,7 +277,7 @@ export default function DaftarPengirimanPage() {
               ) : rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-muted-foreground h-24 text-center"
                   >
                     Tidak ada data yang cocok dengan filter.
@@ -296,6 +298,9 @@ export default function DaftarPengirimanPage() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {row.nomor_kendaraan ?? "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[180px] truncate">
+                        {row.nama_supir_vendor ?? "—"}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {sumDetailJumlah(row)}
