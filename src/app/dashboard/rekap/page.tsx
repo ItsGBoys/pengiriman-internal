@@ -295,23 +295,44 @@ export default function RekapPage() {
             Status: p.status ?? "",
             "Tipe Barang": "",
             "Jumlah Unit Detail": 0,
+            "Nomor Seri": "",
             "Total Unit Pengiriman": sumUnits(p),
           })
           continue
         }
         for (const d of details) {
-          sheetRows.push({
-            Tanggal: dateKey,
-            "ID Pengiriman": p.id,
-            "Toko Tujuan": p.toko_tujuan ?? "",
-            "Nomor DO": p.nomor_do ?? "",
-            "Nomor Kendaraan": p.nomor_kendaraan ?? "",
-            "Supir/Vendor": p.nama_supir_vendor ?? "",
-            Status: p.status ?? "",
-            "Tipe Barang": d.tipe_mesin ?? "",
-            "Jumlah Unit Detail": Number(d.jumlah) || 0,
-            "Total Unit Pengiriman": sumUnits(p),
-          })
+          const serials = d.nomor_seri ?? []
+          if (serials.length === 0) {
+            sheetRows.push({
+              Tanggal: dateKey,
+              "ID Pengiriman": p.id,
+              "Toko Tujuan": p.toko_tujuan ?? "",
+              "Nomor DO": p.nomor_do ?? "",
+              "Nomor Kendaraan": p.nomor_kendaraan ?? "",
+              "Supir/Vendor": p.nama_supir_vendor ?? "",
+              Status: p.status ?? "",
+              "Tipe Barang": d.tipe_mesin ?? "",
+              "Jumlah Unit Detail": Number(d.jumlah) || 0,
+              "Nomor Seri": "",
+              "Total Unit Pengiriman": sumUnits(p),
+            })
+            continue
+          }
+          for (const ns of serials) {
+            sheetRows.push({
+              Tanggal: dateKey,
+              "ID Pengiriman": p.id,
+              "Toko Tujuan": p.toko_tujuan ?? "",
+              "Nomor DO": p.nomor_do ?? "",
+              "Nomor Kendaraan": p.nomor_kendaraan ?? "",
+              "Supir/Vendor": p.nama_supir_vendor ?? "",
+              Status: p.status ?? "",
+              "Tipe Barang": d.tipe_mesin ?? "",
+              "Jumlah Unit Detail": Number(d.jumlah) || 0,
+              "Nomor Seri": ns.nomor_seri ?? "",
+              "Total Unit Pengiriman": sumUnits(p),
+            })
+          }
         }
       }
       const ws = XLSX.utils.json_to_sheet(sheetRows)
