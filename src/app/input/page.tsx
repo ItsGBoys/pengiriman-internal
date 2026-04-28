@@ -112,6 +112,7 @@ const BACKUP_KEY = "pending-pengiriman-submit-v1"
 
 type PendingSubmitPayload = {
   toko_tujuan: string
+  nomor_do: string
   nomor_kendaraan: string
   nama_supir_vendor: string
   tanggal_pengiriman: string
@@ -124,6 +125,7 @@ type PendingSubmitPayload = {
 
 export default function InputPengirimanPage() {
   const [tokoTujuan, setTokoTujuan] = useState("")
+  const [nomorDo, setNomorDo] = useState("")
   const [nomorKendaraan, setNomorKendaraan] = useState("")
   const [namaSupirVendor, setNamaSupirVendor] = useState("")
   const [catatan, setCatatan] = useState("")
@@ -156,6 +158,7 @@ export default function InputPengirimanPage() {
 
   const resetForm = useCallback(() => {
     setTokoTujuan("")
+    setNomorDo("")
     setNomorKendaraan("")
     setNamaSupirVendor("")
     setCatatan("")
@@ -196,6 +199,9 @@ export default function InputPengirimanPage() {
     }
     if (!nomorKendaraan.trim()) {
       return "Nomor kendaraan wajib diisi."
+    }
+    if (!nomorDo.trim()) {
+      return "Nomor DO wajib diisi."
     }
     if (!namaSupirVendor.trim()) {
       return "Nama supir/vendor wajib diisi."
@@ -266,6 +272,7 @@ export default function InputPengirimanPage() {
     }))
     const requestPayload: PendingSubmitPayload = {
       toko_tujuan: normalizeUpper(tokoTujuan),
+      nomor_do: normalizeUpper(nomorDo),
       nomor_kendaraan: normalizeUpper(nomorKendaraan),
       nama_supir_vendor: normalizeUpper(namaSupirVendor),
       tanggal_pengiriman: getLocalDateString(new Date()),
@@ -276,6 +283,7 @@ export default function InputPengirimanPage() {
     const supabase = createClient()
     const { data, error } = await supabase.rpc("submit_pengiriman_staff", {
       p_toko_tujuan: requestPayload.toko_tujuan,
+      p_nomor_do: requestPayload.nomor_do,
       p_nomor_kendaraan: requestPayload.nomor_kendaraan,
       p_nama_supir_vendor: requestPayload.nama_supir_vendor,
       p_tanggal_pengiriman: requestPayload.tanggal_pengiriman,
@@ -310,6 +318,7 @@ export default function InputPengirimanPage() {
     const supabase = createClient()
     const { data, error } = await supabase.rpc("submit_pengiriman_staff", {
       p_toko_tujuan: backup.toko_tujuan,
+      p_nomor_do: backup.nomor_do,
       p_nomor_kendaraan: backup.nomor_kendaraan,
       p_nama_supir_vendor: backup.nama_supir_vendor,
       p_tanggal_pengiriman: backup.tanggal_pengiriman,
@@ -516,6 +525,17 @@ export default function InputPengirimanPage() {
                 placeholder="Nama toko / cabang"
                 className="h-10"
                 autoComplete="organization"
+              />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="nomor-do">Nomor DO</Label>
+              <Input
+                id="nomor-do"
+                value={nomorDo}
+                onChange={(e) => setNomorDo(e.target.value)}
+                placeholder="Contoh: DO-0426-001"
+                className="h-10"
+                autoComplete="off"
               />
             </div>
             <div className="space-y-2 sm:col-span-2">
@@ -755,6 +775,7 @@ export default function InputPengirimanPage() {
             </DialogDescription>
             <ul className="text-foreground mt-3 list-inside list-disc text-left text-sm">
               <li>Toko: {tokoTujuan.trim() || "—"}</li>
+              <li>Nomor DO: {nomorDo.trim() || "—"}</li>
               <li>Kendaraan: {nomorKendaraan.trim() || "—"}</li>
               <li>Supir/Vendor: {namaSupirVendor.trim() || "—"}</li>
               <li>

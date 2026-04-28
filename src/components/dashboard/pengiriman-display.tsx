@@ -7,6 +7,7 @@ export type PengirimanListRow = {
   id: string
   tanggal_pengiriman: string
   toko_tujuan: string | null
+  nomor_do: string | null
   nomor_kendaraan: string | null
   nama_supir_vendor: string | null
   status: string | null

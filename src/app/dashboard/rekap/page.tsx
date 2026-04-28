@@ -105,6 +105,7 @@ export default function RekapPage() {
         id,
         tanggal_pengiriman,
         toko_tujuan,
+        nomor_do,
         nomor_kendaraan,
         nama_supir_vendor,
         catatan,
@@ -288,6 +289,7 @@ export default function RekapPage() {
             Tanggal: dateKey,
             "ID Pengiriman": p.id,
             "Toko Tujuan": p.toko_tujuan ?? "",
+            "Nomor DO": p.nomor_do ?? "",
             "Nomor Kendaraan": p.nomor_kendaraan ?? "",
             "Supir/Vendor": p.nama_supir_vendor ?? "",
             Status: p.status ?? "",
@@ -302,6 +304,7 @@ export default function RekapPage() {
             Tanggal: dateKey,
             "ID Pengiriman": p.id,
             "Toko Tujuan": p.toko_tujuan ?? "",
+            "Nomor DO": p.nomor_do ?? "",
             "Nomor Kendaraan": p.nomor_kendaraan ?? "",
             "Supir/Vendor": p.nama_supir_vendor ?? "",
             Status: p.status ?? "",
@@ -358,12 +361,13 @@ export default function RekapPage() {
 
     const colDefs = [
       { title: "Tanggal", width: 22 },
-      { title: "Toko", width: 32 },
-      { title: "Kendaraan", width: 24 },
-      { title: "Supir/Vendor", width: 32 },
+      { title: "Toko", width: 28 },
+      { title: "DO", width: 20 },
+      { title: "Kendaraan", width: 20 },
+      { title: "Supir/Vendor", width: 28 },
       { title: "Unit", width: 10 },
       { title: "Status", width: 16 },
-      { title: "Catatan", width: 36 },
+      { title: "Catatan", width: 24 },
     ]
     const tableW = colDefs.reduce((acc, c) => acc + c.width, 0)
     const drawRow = (values: string[], isHeader = false) => {
@@ -396,6 +400,7 @@ export default function RekapPage() {
       const row = [
         normalizeDateKey(p.tanggal_pengiriman),
         p.toko_tujuan ?? "",
+        p.nomor_do ?? "",
         p.nomor_kendaraan ?? "",
         p.nama_supir_vendor ?? "",
         String(sumUnits(p)),

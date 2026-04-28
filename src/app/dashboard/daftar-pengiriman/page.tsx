@@ -85,6 +85,7 @@ export default function DaftarPengirimanPage() {
         id,
         tanggal_pengiriman,
         toko_tujuan,
+        nomor_do,
         nomor_kendaraan,
         nama_supir_vendor,
         status,
@@ -100,6 +101,7 @@ export default function DaftarPengirimanPage() {
       const pattern = `%${safe}%`
       q = q.or(
         `toko_tujuan.ilike.${pattern},nomor_kendaraan.ilike.${pattern},nama_supir_vendor.ilike.${pattern}`
+        + `,nomor_do.ilike.${pattern}`
       )
     }
 
@@ -183,7 +185,7 @@ export default function DaftarPengirimanPage() {
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2 sm:col-span-2 lg:col-span-2">
-              <Label htmlFor="search">Cari toko, kendaraan, atau supir/vendor</Label>
+              <Label htmlFor="search">Cari toko, DO, kendaraan, atau supir/vendor</Label>
               <Input
                 id="search"
                 value={searchInput}
@@ -257,6 +259,7 @@ export default function DaftarPengirimanPage() {
               <TableRow>
                 <TableHead>Tanggal</TableHead>
                 <TableHead className="min-w-[120px]">Toko tujuan</TableHead>
+                <TableHead>Nomor DO</TableHead>
                 <TableHead>Nomor kendaraan</TableHead>
                 <TableHead>Supir/Vendor</TableHead>
                 <TableHead className="text-right">Total unit</TableHead>
@@ -295,6 +298,9 @@ export default function DaftarPengirimanPage() {
                       </TableCell>
                       <TableCell className="max-w-[180px] truncate font-medium">
                         {row.toko_tujuan ?? "—"}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {row.nomor_do ?? "—"}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {row.nomor_kendaraan ?? "—"}
