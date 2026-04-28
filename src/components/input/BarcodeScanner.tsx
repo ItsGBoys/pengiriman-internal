@@ -31,6 +31,12 @@ export default function BarcodeScanner({
   onResult,
   kategori,
 }: BarcodeScannerProps) {
+  function extractStrictSerial(decodedText: string) {
+    const upper = decodedText.toUpperCase()
+    const match = upper.match(SERIAL_PATTERN)
+    return match?.[0] ?? null
+  }
+
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const scannedListRef = useRef<string[]>([])
   const cooldownUntilRef = useRef(0)
@@ -114,29 +120,33 @@ export default function BarcodeScanner({
             Html5QrcodeSupportedFormats.EAN_13,
             Html5QrcodeSupportedFormats.EAN_8,
             Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.CODE_93,
+            Html5QrcodeSupportedFormats.ITF,
+            Html5QrcodeSupportedFormats.CODABAR,
             Html5QrcodeSupportedFormats.QR_CODE,
           ],
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true,
+          },
         })
         scannerRef.current = html5QrCode
 
         await html5QrCode.start(
           { facingMode: "environment" },
           {
-            fps: 10,
-            qrbox:
-              kategori === "front-load"
-                ? { width: 200, height: 300 }
-                : { width: 300, height: 200 },
+            fps: 15,
+            // Full frame: biar area scan tidak kekunci kotak kecil.
+            // Filter serial di bawah ditangani via pola serial number yang ketat.
+            qrbox: undefined,
           },
           (decodedText) => {
             if (cancelled) return
             if (Date.now() < cooldownUntilRef.current) return
 
-            const upper = decodedText.toUpperCase()
-            const match = upper.match(SERIAL_PATTERN)
-            if (!match) return
-
-            const sn = match[0]
+            const sn = extractStrictSerial(decodedText)
+            if (!sn) return
             const key = sn.toLowerCase()
             if (
               scannedListRef.current.some((s) => s.toLowerCase() === key)
