@@ -17,8 +17,34 @@ const scannerId = "barcode-scanner-container"
 // Format serial:
 // YY M W L SSSSS
 // YY = tahun (contoh 26), M = 1..9 atau O/N/D, W = minggu 1..5, L = lini, SSSSS = urutan produk
-const SERIAL_PATTERN = /\d{2}[1-9OND][1-5]\d\d{5}/
 const FEEDBACK_CLEAR_MS = 2000
+
+function isValidSerialCandidate(candidate: string) {
+  if (candidate.length !== 10) return false
+  const yy = candidate.slice(0, 2)
+  const month = candidate[2]
+  const week = candidate[3]
+  const line = candidate[4]
+  const sequence = candidate.slice(5)
+  if (!/^\d{2}$/.test(yy)) return false
+  if (!/^[1-9OND]$/.test(month)) return false
+  if (!/^[1-5]$/.test(week)) return false
+  if (!/^\d$/.test(line)) return false
+  if (!/^\d{5}$/.test(sequence)) return false
+  return true
+}
+
+function extractStrictSerial(decodedText: string) {
+  const compact = decodedText.toUpperCase().replace(/[^0-9A-Z]/g, "")
+  if (compact.length < 10) return null
+  // Ambil kandidat valid terakhir agar lebih condong ke serial utama
+  // saat decode mengandung prefix/suffix/checksum tambahan.
+  for (let i = compact.length - 10; i >= 0; i--) {
+    const candidate = compact.slice(i, i + 10)
+    if (isValidSerialCandidate(candidate)) return candidate
+  }
+  return null
+}
 
 export interface BarcodeScannerProps {
   isOpen: boolean
@@ -33,16 +59,6 @@ export default function BarcodeScanner({
   onResult,
   kategori,
 }: BarcodeScannerProps) {
-  function extractStrictSerial(decodedText: string) {
-    const upper = decodedText.toUpperCase()
-    const direct = upper.match(SERIAL_PATTERN)
-    if (direct?.[0]) return direct[0]
-    // Normalisasi bila scanner menyisipkan spasi/simbol.
-    const compact = upper.replace(/[^0-9A-Z]/g, "")
-    const compactMatch = compact.match(SERIAL_PATTERN)
-    return compactMatch?.[0] ?? null
-  }
-
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const scannedListRef = useRef<string[]>([])
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -140,7 +156,7 @@ export default function BarcodeScanner({
         await html5QrCode.start(
           { facingMode: "environment" },
           {
-            fps: 20,
+            fps: 12,
             // Full frame: biar area scan tidak kekunci kotak kecil.
             // Filter serial di bawah ditangani via pola serial number yang ketat.
             qrbox: undefined,
