@@ -18,7 +18,6 @@ const scannerId = "barcode-scanner-container"
 // YY M W L SSSSS
 // YY = tahun (contoh 26), M = 1..9 atau O/N/D, W = minggu 1..5, L = lini, SSSSS = urutan produk
 const SERIAL_PATTERN = /\d{2}[1-9OND][1-5]\d\d{5}/
-const SCAN_COOLDOWN_MS = 1500
 const FEEDBACK_CLEAR_MS = 2000
 
 export interface BarcodeScannerProps {
@@ -46,7 +45,6 @@ export default function BarcodeScanner({
 
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const scannedListRef = useRef<string[]>([])
-  const cooldownUntilRef = useRef(0)
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -66,7 +64,6 @@ export default function BarcodeScanner({
     scannedListRef.current = []
     setShowList(false)
     setScanFeedback(null)
-    cooldownUntilRef.current = 0
     if (feedbackTimeoutRef.current) {
       clearTimeout(feedbackTimeoutRef.current)
       feedbackTimeoutRef.current = null
@@ -143,28 +140,22 @@ export default function BarcodeScanner({
         await html5QrCode.start(
           { facingMode: "environment" },
           {
-            fps: 15,
+            fps: 20,
             // Full frame: biar area scan tidak kekunci kotak kecil.
             // Filter serial di bawah ditangani via pola serial number yang ketat.
             qrbox: undefined,
           },
           (decodedText) => {
             if (cancelled) return
-            if (Date.now() < cooldownUntilRef.current) return
 
             const sn = extractStrictSerial(decodedText)
             if (!sn) return
             const key = sn.toLowerCase()
-            if (
-              scannedListRef.current.some((s) => s.toLowerCase() === key)
-            ) {
-              return
-            }
+            if (scannedListRef.current.some((s) => s.toLowerCase() === key)) return
 
             const next = [...scannedListRef.current, sn]
             scannedListRef.current = next
             setScannedList(next)
-            cooldownUntilRef.current = Date.now() + SCAN_COOLDOWN_MS
             setScanFeedback(`✓ ${sn} ditambahkan`)
 
             if (feedbackTimeoutRef.current) {
