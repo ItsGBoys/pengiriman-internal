@@ -14,7 +14,10 @@ import {
 import { cn } from "@/lib/utils"
 
 const scannerId = "barcode-scanner-container"
-const SERIAL_PATTERN = /\b\d{2}[0-9OND]\d{7}\b/
+// Format serial:
+// YY M W L SSSSS
+// YY = tahun (contoh 26), M = 1..9 atau O/N/D, W = minggu 1..5, L = lini, SSSSS = urutan produk
+const SERIAL_PATTERN = /\d{2}[1-9OND][1-5]\d\d{5}/
 const SCAN_COOLDOWN_MS = 1500
 const FEEDBACK_CLEAR_MS = 2000
 
@@ -33,8 +36,12 @@ export default function BarcodeScanner({
 }: BarcodeScannerProps) {
   function extractStrictSerial(decodedText: string) {
     const upper = decodedText.toUpperCase()
-    const match = upper.match(SERIAL_PATTERN)
-    return match?.[0] ?? null
+    const direct = upper.match(SERIAL_PATTERN)
+    if (direct?.[0]) return direct[0]
+    // Normalisasi bila scanner menyisipkan spasi/simbol.
+    const compact = upper.replace(/[^0-9A-Z]/g, "")
+    const compactMatch = compact.match(SERIAL_PATTERN)
+    return compactMatch?.[0] ?? null
   }
 
   const scannerRef = useRef<Html5Qrcode | null>(null)
